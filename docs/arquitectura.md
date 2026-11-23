@@ -6,7 +6,7 @@
 |---|---|---|
 | Núcleo | Rust 2024, Tokio, Axum | Binario único, sin runtime externo, bajo consumo de memoria (~15 MB en reposo) y concurrencia segura para muchas ejecuciones simultáneas. |
 | Escritorio | Tauri 2 | WebView del sistema (WebView2 / WebKitGTK) en lugar de un Chromium empaquetado; genera NSIS/MSI, AppImage, DEB y RPM; incluye bandeja, inicio automático e instancia única. |
-| Interfaz | Vue 3, TypeScript, Vite, Tailwind CSS 4, CodeMirror 6 | Ecosistema maduro y ligero. La UI se compila y se embebe en el binario (`rust-embed`): funciona sin Internet. |
+| Interfaz | Vue 3, TypeScript, Vite, Vuetify 4, CodeMirror 6 | Componentes maduros y temas nativos. Los *look and feels* (Cupertino Glass por defecto, Fluent, JetBrains, Atlas…) vienen del módulo de temas de la plataforma (`ui/src/platform/adapters/vue/themes`). La UI se compila y se embebe en el binario (`rust-embed`): funciona sin Internet. |
 | Plantillas | MiniJinja | Sintaxis `{{ }}` conocida, sandbox, límite de ejecución (fuel) y sin acceso a E/S. |
 | Validación | `jsonschema` | JSON Schema completo para validar bodies. |
 | Persistencia | Archivos JSON + SQLite (`sqlx`, incluido en el binario) | JSON para la configuración (Git); SQLite en modo WAL para el historial y, en la fase 2, las ejecuciones y timers durables. |
@@ -27,7 +27,7 @@ crates/
   fakes-store     7. Persistencia de ejecución: SQLite (historial, clave-valor).
   fakes-api       8. API REST + entrega de la interfaz web.
   (fase 3)        9. Servidor MCP (usará fakes-app igual que la API REST).
-  ui/            10. Interfaz gráfica (Vue).
+  ui/            10. Interfaz gráfica (Vue + Vuetify).
   fakes-app       Servicios de aplicación: los casos de uso que comparten UI, REST y MCP.
   fakes-cli       Binario `fakes` (sin interfaz de escritorio).
 apps/desktop      Binario de escritorio (Tauri).
@@ -93,3 +93,25 @@ descarta el registro con una advertencia.
 - **MCP** (fase 3): los tipos del dominio y las vistas derivan `JsonSchema`, de modo que los
   esquemas de entrada y salida de cada herramienta se generan de los mismos tipos que usa REST.
 - **Recursos simulados persistentes** (fase 4): colecciones genéricas en SQLite por espacio.
+
+## Interfaz y apariencia
+
+```text
+ui/src/
+  app/
+    configuration/   router y apariencia (catálogo de look and feels, preferencias)
+    modules/         dashboard, services, endpoints, history, workspaces, settings
+    shared/          layout, componentes, estado en vivo, estilos
+  infrastructure/    cliente de la API REST de administración
+  platform/          módulo de temas (look and feels de Vuetify)
+```
+
+- El usuario elige **look and feel**, **modo** (claro, oscuro o sistema) y **color de acento**
+  en *Apariencia*. Se guarda en `localStorage`.
+- Cada look and feel se carga con `import()` dinámico antes de crear Vuetify, así solo se
+  descarga su CSS. Cambiarlo recarga la interfaz (sus defaults se aplican al crear Vuetify);
+  el modo cambia en caliente con `theme.change()`.
+- Los look and feels usan campos `singleLine`. Para que las etiquetas sigan visibles con valor,
+  la app usa `FTextField`, `FSelect`, `FCombobox` y `FTextarea` (etiqueta externa asociada al
+  input por `id`) en lugar de los componentes `V*` directamente.
+- No se fijan variantes, densidades ni radios en las vistas: los define el look and feel.

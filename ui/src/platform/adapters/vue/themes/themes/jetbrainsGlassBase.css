@@ -1,0 +1,49 @@
+.lf-jb-base {
+  font-size: 0.8125rem;
+}
+
+.lf-jb-base :where(h1, h2, h3) {
+  letter-spacing: -0.045em;
+}
+
+.lf-jb-base-panel-title {
+  background: rgb(var(--v-theme-surface-light));
+  border-bottom: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+}
+
+.lf-jb-base-input .v-field {
+  --v-input-control-height: 32px;
+  --v-input-padding-top: 4px;
+  --v-field-padding-top: 0px;
+  --v-field-padding-bottom: 4px;
+  font-size: 0.8125rem;
+}
+
+.lf-jb-base .v-label {
+  color: rgb(var(--v-theme-on-surface-variant));
+  font-family: var(--v-font-heading);
+  font-size: 0.75rem;
+}
+
+.lf-jb-base .v-list-item-title,
+.lf-jb-base .v-btn {
+  font-size: 0.8125rem;
+}
+
+.lf-jb-base-table {
+  --v-table-header-height: 32px;
+  --v-table-row-height: 32px;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.lf-jb-base-table thead {
+  background: rgb(var(--v-theme-surface-light));
+  font-family: var(--v-font-heading);
+}
+
+.lf-jb-base-menu > .v-list,
+.lf-jb-base-dialog > .v-card {
+  border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  border-radius: 4px;
+}

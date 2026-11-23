@@ -1,0 +1,233 @@
+/* Expressive Fluent adaptation. Native layout offsets, focus rings, validation,
+   overlays, hit targets and event handling remain owned by Vuetify. */
+.lf-fluent {
+  background-image:
+    radial-gradient(
+      ellipse at 95% 5%,
+      rgba(var(--v-theme-glow-cool), var(--v-fluent-glow-opacity)),
+      transparent 48%
+    ),
+    radial-gradient(
+      ellipse at 20% 45%,
+      rgba(var(--v-theme-glow-warm), var(--v-fluent-glow-opacity)),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse at 85% 95%,
+      rgba(var(--v-theme-glow-mint), var(--v-fluent-glow-opacity)),
+      transparent 55%
+    );
+  background-attachment: fixed;
+}
+
+.lf-fluent h1.text-headline-large {
+  max-width: 20ch;
+  font-size: clamp(2.25rem, 3.8vw, 3.5rem);
+  line-height: 1.1;
+  letter-spacing: -0.055em;
+  text-wrap: balance;
+}
+
+.lf-fluent .v-card .text-headline-large {
+  font-size: 2.5rem;
+  letter-spacing: -0.055em;
+  font-variant-numeric: tabular-nums;
+}
+
+.lf-fluent-card {
+  background: rgba(var(--v-theme-surface), var(--v-fluent-glass-opacity));
+  border: 1px solid rgba(255, 255, 255, var(--v-fluent-stroke-opacity));
+  box-shadow:
+    0 1px 2px rgba(12, 30, 55, 0.05),
+    0 12px 36px -12px rgba(12, 30, 55, var(--v-fluent-shadow-opacity)),
+    inset 0 1px 0 rgba(255, 255, 255, var(--v-fluent-stroke-opacity));
+  backdrop-filter: blur(28px) saturate(125%);
+}
+
+.lf-fluent-card > .v-card-title {
+  letter-spacing: -0.025em;
+}
+
+.lf-fluent-navigation {
+  background: transparent;
+}
+
+.lf-fluent-navigation::before {
+  content: '';
+  position: absolute;
+  inset: 14px 8px 14px 14px;
+  border-radius: 22px;
+  background:
+    linear-gradient(160deg, rgba(var(--v-theme-glow-cool), 0.14), transparent 50%),
+    rgba(var(--v-theme-navigation), var(--v-fluent-glass-opacity));
+  border: 1px solid rgba(255, 255, 255, var(--v-fluent-stroke-opacity));
+  box-shadow: 0 16px 48px -24px rgba(12, 30, 55, 0.35);
+  backdrop-filter: blur(32px) saturate(140%);
+  pointer-events: none;
+}
+
+.lf-fluent-navigation .v-navigation-drawer__content {
+  position: relative;
+  padding-block: 18px;
+}
+
+.lf-fluent-navigation .v-divider {
+  margin-inline: 24px;
+}
+
+.lf-fluent-list-item.v-list-item--active {
+  background: rgba(var(--v-theme-surface), 0.7);
+  background-image: linear-gradient(rgb(var(--v-theme-primary)), rgb(var(--v-theme-primary)));
+  background-position: left center;
+  background-size: 3px 20px;
+  background-repeat: no-repeat;
+  box-shadow: 0 2px 8px rgba(12, 30, 55, 0.08);
+}
+
+.lf-fluent-list-item.v-list-item--active:dir(rtl) {
+  background-position: right center;
+}
+
+.lf-fluent-appbar {
+  background: rgba(var(--v-theme-header), 0.68);
+  border-bottom: 1px solid rgba(255, 255, 255, var(--v-fluent-stroke-opacity));
+  backdrop-filter: blur(28px) saturate(140%);
+}
+
+.lf-fluent-button.v-btn--variant-flat {
+  background-image: linear-gradient(165deg, rgba(255, 255, 255, 0.18), transparent 65%);
+  box-shadow:
+    0 5px 16px -5px rgba(var(--v-theme-primary), 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  border: 1px solid rgba(var(--v-theme-on-primary), 0.08);
+}
+
+.lf-fluent-avatar {
+  border: 1px solid rgba(var(--v-theme-primary), 0.12);
+  background-image: linear-gradient(145deg, rgba(var(--v-theme-surface), 0.6), transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, var(--v-fluent-stroke-opacity));
+}
+
+.lf-fluent-input .v-field {
+  background: rgba(var(--v-theme-input), 0.85);
+  box-shadow: 0 1px 0 rgba(var(--v-theme-on-surface), 0.24);
+}
+
+.lf-fluent-input .v-field--focused {
+  box-shadow: 0 2px 0 rgb(var(--v-theme-primary));
+}
+
+.lf-fluent-input .v-field--error {
+  box-shadow: 0 2px 0 rgb(var(--v-theme-error));
+}
+
+.lf-fluent .v-label {
+  color: rgb(var(--v-theme-on-surface-variant));
+  font-size: 0.8125rem;
+  letter-spacing: 0.01em;
+}
+
+.lf-fluent-alert {
+  border-inline-start: 3px solid currentColor;
+  background-image: linear-gradient(110deg, rgba(var(--v-theme-surface), 0.25), transparent);
+}
+
+.lf-fluent-table {
+  --v-table-header-height: 40px;
+  --v-table-row-height: 56px;
+  background: transparent;
+  border-radius: 10px;
+}
+
+.lf-fluent-table thead {
+  background: rgba(var(--v-theme-surface-variant), 0.45);
+  color: rgb(var(--v-theme-on-surface-variant));
+  font-size: 0.75rem;
+  letter-spacing: 0.025em;
+}
+
+.lf-fluent-chip {
+  border: 1px solid currentColor;
+  font-weight: 600;
+}
+
+/* Select/autocomplete menus are teleported. Their profile travels with them. */
+.lf-fluent-menu,
+.lf-fluent-dialog > .v-card,
+.lf-fluent-tooltip {
+  border: 1px solid rgba(255, 255, 255, var(--v-fluent-stroke-opacity));
+  background: rgba(var(--v-theme-surface), 0.9);
+  color: rgb(var(--v-theme-on-surface));
+  box-shadow: 0 24px 80px -16px rgba(12, 30, 55, 0.4);
+  backdrop-filter: blur(32px) saturate(150%);
+}
+
+.lf-fluent-menu > .v-list {
+  padding: 8px;
+  background: transparent;
+}
+
+.lf-fluent-menu .v-list-item {
+  border-radius: 8px;
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .lf-fluent-card,
+  .lf-fluent-menu,
+  .lf-fluent-dialog > .v-card {
+    background: rgb(var(--v-theme-surface));
+  }
+  .lf-fluent-navigation::before,
+  .lf-fluent-appbar {
+    background: rgb(var(--v-theme-navigation));
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lf-fluent-card {
+    transition:
+      border-color 180ms ease,
+      box-shadow 180ms ease;
+  }
+  .lf-fluent-card:hover {
+    border-color: rgba(var(--v-theme-primary), 0.25);
+    box-shadow: 0 18px 48px -16px rgba(12, 30, 55, 0.2);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .lf-fluent-card,
+  .lf-fluent-menu,
+  .lf-fluent-dialog > .v-card,
+  .lf-fluent-tooltip {
+    background: rgb(var(--v-theme-surface));
+    backdrop-filter: none;
+  }
+  .lf-fluent-navigation::before,
+  .lf-fluent-appbar {
+    background: rgb(var(--v-theme-navigation));
+    backdrop-filter: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .lf-fluent {
+    background-attachment: scroll;
+  }
+  .lf-fluent-card {
+    backdrop-filter: none;
+    background: rgba(var(--v-theme-surface), 0.94);
+  }
+}
+
+@media (forced-colors: active) {
+  .lf-fluent-card,
+  .lf-fluent-menu,
+  .lf-fluent-input .v-field,
+  .lf-fluent-navigation::before {
+    border: 1px solid CanvasText;
+  }
+  .lf-fluent-list-item.v-list-item--active {
+    border-inline-start: 3px solid Highlight;
+  }
+}

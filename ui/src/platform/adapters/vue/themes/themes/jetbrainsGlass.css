@@ -1,0 +1,159 @@
+/* Glass material with the original editor density, fonts and hit targets. */
+.lf-jetbrains-glass {
+  background-image:
+    radial-gradient(
+      ellipse at 15% 0%,
+      rgba(var(--v-theme-glass-violet), var(--v-jb-glass-glow)),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse at 100% 40%,
+      rgba(var(--v-theme-glass-cyan), var(--v-jb-glass-glow)),
+      transparent 55%
+    ),
+    radial-gradient(
+      ellipse at 30% 100%,
+      rgba(var(--v-theme-glass-pink), var(--v-jb-glass-glow)),
+      transparent 50%
+    ),
+    linear-gradient(rgba(var(--v-theme-on-background), 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(var(--v-theme-on-background), 0.025) 1px, transparent 1px);
+  background-size:
+    auto,
+    auto,
+    auto,
+    32px 32px,
+    32px 32px;
+  background-attachment: fixed;
+}
+
+.lf-jb-glass-panel {
+  background: rgba(var(--v-theme-surface), var(--v-jb-glass-opacity));
+  border: 1px solid rgba(255, 255, 255, var(--v-jb-glass-stroke));
+  box-shadow:
+    0 12px 32px -12px rgba(8, 10, 26, var(--v-jb-glass-shadow)),
+    inset 0 1px 0 rgba(255, 255, 255, var(--v-jb-glass-stroke));
+  backdrop-filter: blur(24px) saturate(135%);
+}
+
+.lf-jb-glass-title {
+  background: rgba(var(--v-theme-surface-light), 0.4);
+  border-bottom: 1px solid rgba(var(--v-theme-primary), 0.18);
+}
+
+.lf-jb-glass-navigation,
+.lf-jb-glass-appbar {
+  background: rgba(var(--v-theme-navigation), var(--v-jb-glass-opacity));
+  backdrop-filter: blur(32px) saturate(140%);
+}
+
+.lf-jb-glass-navigation {
+  border-inline-end: 1px solid rgba(255, 255, 255, var(--v-jb-glass-stroke));
+}
+
+.lf-jb-glass-appbar {
+  border-bottom: 1px solid rgba(255, 255, 255, var(--v-jb-glass-stroke));
+}
+
+.lf-jetbrains-glass .v-list-item--active {
+  background-image: linear-gradient(100deg, rgba(var(--v-theme-primary), 0.12), transparent);
+  box-shadow: inset 2px 0 0 rgb(var(--v-theme-primary));
+}
+
+.lf-jetbrains-glass .v-list-item--active:dir(rtl) {
+  box-shadow: inset -2px 0 0 rgb(var(--v-theme-primary));
+}
+
+.lf-jb-glass-button.v-btn--variant-flat {
+  background-image: linear-gradient(140deg, rgba(255, 255, 255, 0.18), transparent);
+  box-shadow:
+    0 3px 12px -4px rgba(var(--v-theme-primary), 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+.lf-jetbrains-glass .lf-jb-base-input .v-field {
+  background: rgba(var(--v-theme-input), 0.7);
+}
+
+.lf-jetbrains-glass .lf-jb-base-table {
+  background: transparent;
+}
+
+.lf-jetbrains-glass .lf-jb-base-table thead {
+  background: rgba(var(--v-theme-surface-light), 0.4);
+}
+
+/* Menus are teleported and therefore carry their own material class. */
+.lf-jb-glass-menu,
+.lf-jb-glass-dialog > .v-card,
+.lf-jb-glass-tooltip {
+  background: rgba(var(--v-theme-surface), 0.88);
+  border: 1px solid rgba(255, 255, 255, var(--v-jb-glass-stroke));
+  color: rgb(var(--v-theme-on-surface));
+  box-shadow: 0 24px 64px -12px rgba(8, 10, 26, 0.4);
+  backdrop-filter: blur(32px) saturate(135%);
+}
+
+.lf-jb-glass-menu > .v-list {
+  background: transparent;
+  padding: 4px;
+}
+
+.lf-jb-glass-menu .v-list-item {
+  border-radius: 4px;
+  min-height: 32px;
+  font-size: 0.8125rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .lf-jb-glass-panel {
+    transition: border-color 160ms ease;
+  }
+  .lf-jb-glass-panel:hover {
+    border-color: rgba(var(--v-theme-primary), 0.4);
+  }
+}
+
+@supports not (backdrop-filter: blur(1px)) {
+  .lf-jb-glass-panel,
+  .lf-jb-glass-navigation,
+  .lf-jb-glass-appbar,
+  .lf-jb-glass-menu,
+  .lf-jb-glass-dialog > .v-card,
+  .lf-jb-glass-tooltip {
+    background: rgb(var(--v-theme-surface));
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .lf-jb-glass-panel,
+  .lf-jb-glass-navigation,
+  .lf-jb-glass-appbar,
+  .lf-jb-glass-menu,
+  .lf-jb-glass-dialog > .v-card,
+  .lf-jb-glass-tooltip {
+    background: rgb(var(--v-theme-surface));
+    backdrop-filter: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .lf-jetbrains-glass {
+    background-attachment: scroll;
+  }
+  .lf-jb-glass-panel {
+    background: rgba(var(--v-theme-surface), 0.92);
+    backdrop-filter: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .lf-jb-glass-panel,
+  .lf-jb-glass-menu,
+  .lf-jb-glass-dialog > .v-card {
+    border: 1px solid CanvasText;
+  }
+  .lf-jetbrains-glass .v-list-item--active {
+    border-inline-start: 2px solid Highlight;
+  }
+}

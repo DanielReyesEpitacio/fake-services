@@ -17,3 +17,11 @@
 - `cargo run -p fakes-cli`: núcleo + API en :4010 y simulaciones en :4000.
 - `cd ui && pnpm build`: compila la UI que se embebe en el binario (`ui/dist`).
 - `cd ui && pnpm dev`: UI con recarga en :5173 (proxy a :4010 con el token local).
+- `cd ui && pnpm test`: pruebas de la UI (incluye aislamiento de look and feels).
+
+## Interfaz
+
+- Vuetify 4 con look and feels de `ui/src/platform/adapters/vue/themes` (copiado del CRM; Cupertino
+  Glass por defecto). No fijes `variant`, `density` ni `rounded` en las vistas salvo que sea semántico.
+- Usa `FTextField`/`FSelect`/`FCombobox`/`FTextarea` (etiqueta externa) en lugar de `V*` para campos.
+- Iconos con nombres `mdi-*`: Cupertino Glass los traduce a Phosphor.

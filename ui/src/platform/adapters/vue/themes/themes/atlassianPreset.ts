@@ -1,0 +1,115 @@
+import { createSystemDefaults } from './systemDefaults.ts'
+import type { EnterprisePreset } from './types.ts'
+
+const defaults = createSystemDefaults({
+  radius: 6,
+  density: 'comfortable',
+  space: 4,
+  field: 'outlined',
+  cardBorder: true,
+  button: 'flat',
+  navigationWidth: 256,
+})
+
+/**
+ * An Atlassian-inspired adaptation built exclusively with native Vuetify options.
+ * Neutral work surfaces, compact controls, restrained borders and blue actions.
+ * This is not an official Atlassian theme or a pixel-identical implementation.
+ */
+export const atlassianPreset: EnterprisePreset = {
+  light: {
+    colors: {
+      background: '#FFFFFF',
+      surface: '#FFFFFF',
+      'surface-light': '#F1F2F4',
+      'surface-bright': '#FFFFFF',
+      'surface-variant': '#EBECF0',
+      'on-surface-variant': '#44546F',
+      'on-background': '#292A2E',
+      'on-surface': '#292A2E',
+      navigation: '#FAFAFA',
+      'on-navigation': '#44546F',
+      header: '#FFFFFF',
+      input: '#FFFFFF',
+      primary: '#0C66E4',
+      secondary: '#44546F',
+      info: '#0C66E4',
+      success: '#216E4E',
+      warning: '#8F5F00',
+      error: '#AE2E24',
+    },
+    variables: {
+      'font-body': 'Segoe UI, Arial, sans-serif',
+      'font-heading': 'Segoe UI, Arial, sans-serif',
+      'border-color': '#454545',
+      'border-opacity': 0.18,
+      'hover-opacity': 0.04,
+      'focus-opacity': 0.12,
+      'selected-opacity': 0.1,
+      'activated-opacity': 0.1,
+      'pressed-opacity': 0.14,
+    },
+  },
+  dark: {
+    colors: {
+      background: '#242426',
+      surface: '#29292C',
+      'surface-light': '#323235',
+      'surface-bright': '#3A3A3D',
+      'surface-variant': '#37373A',
+      'on-surface-variant': '#C7C8CC',
+      'on-background': '#E2E2E5',
+      'on-surface': '#E2E2E5',
+      navigation: '#1F1F21',
+      'on-navigation': '#C7C8CC',
+      header: '#242426',
+      input: '#252527',
+      primary: '#85B8FF',
+      secondary: '#B6C2CF',
+      info: '#85B8FF',
+      success: '#7EE2B8',
+      warning: '#F5CD47',
+      error: '#FD9891',
+    },
+    variables: {
+      'font-body': 'Segoe UI, Arial, sans-serif',
+      'font-heading': 'Segoe UI, Arial, sans-serif',
+      'border-color': '#B0B0B3',
+      'border-opacity': 0.24,
+      'hover-opacity': 0.06,
+      'focus-opacity': 0.14,
+      'selected-opacity': 0.12,
+      'activated-opacity': 0.12,
+      'pressed-opacity': 0.16,
+    },
+  },
+  defaults: {
+    ...defaults,
+    VTextField: { ...defaults.VTextField, density: 'compact', singleLine: false },
+    VSelect: { ...defaults.VSelect, density: 'compact', singleLine: false },
+    VAutocomplete: { ...defaults.VAutocomplete, density: 'compact', singleLine: false },
+    VTextarea: { ...defaults.VTextarea, density: 'compact', singleLine: false },
+    VBtn: {
+      rounded: 6,
+      density: 'default',
+      height: 32,
+      variant: 'flat',
+      color: 'primary',
+      elevation: 0,
+      ripple: false,
+      class: 'text-none font-weight-medium',
+    },
+    VCardTitle: { class: 'px-4 pt-4 pb-2 text-title-medium font-weight-bold text-wrap' },
+    VChip: { rounded: 6, variant: 'tonal', size: 'small' },
+    VAlert: { rounded: 6, variant: 'tonal', density: 'compact' },
+    VAppBar: { color: 'header', elevation: 0, border: 'b', height: 56 },
+    VListItem: {
+      rounded: 6,
+      density: 'comfortable',
+      variant: 'text',
+      color: 'primary',
+      baseColor: 'on-navigation',
+      ripple: false,
+    },
+  },
+}

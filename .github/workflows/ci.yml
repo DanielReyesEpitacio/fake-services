@@ -30,6 +30,7 @@ jobs:
         working-directory: ui
         run: |
           pnpm install --frozen-lockfile
+          pnpm test
           pnpm build
       - uses: dtolnay/rust-toolchain@stable
         with:

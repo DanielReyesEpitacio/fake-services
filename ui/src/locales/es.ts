@@ -11,6 +11,7 @@ export default {
     history: 'Historial',
     workspaces: 'Espacios de trabajo',
     settings: 'Ajustes',
+    appearance: 'Apariencia',
   },
   common: {
     save: 'Guardar',

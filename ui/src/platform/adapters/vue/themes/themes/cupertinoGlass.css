@@ -1,0 +1,230 @@
+/* Neutral frosted materials. All backgrounds are flat colors, without gradients. */
+.lf-cupertino-glass {
+  font-family: var(--v-font-body);
+  background: rgb(var(--v-theme-background));
+  letter-spacing: -0.012em;
+}
+
+.lf-cupertino-glass :where(h1, h2, h3, .v-card-title) {
+  font-family: var(--v-font-heading);
+  letter-spacing: -0.025em;
+}
+
+.lf-cupertino-glass-sheet,
+.lf-cupertino-glass-panel,
+.lf-cupertino-glass-navigation::before,
+.lf-cupertino-glass-appbar::before,
+.lf-cupertino-glass-main::before,
+.lf-cupertino-glass-menu.v-overlay__content > .v-list,
+.lf-cupertino-glass-dialog.v-overlay__content > .v-card,
+.lf-cupertino-glass-tooltip.v-overlay__content {
+  --cupertino-material: var(--v-theme-surface);
+  --cupertino-opacity: var(--v-cupertino-glass-opacity);
+  background: rgb(var(--cupertino-material));
+  color: rgb(var(--v-theme-on-surface));
+  border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  box-shadow:
+    0 5px 18px -8px rgba(0, 0, 0, var(--v-cupertino-glass-shadow)),
+    inset 0 1px 0 rgba(255, 255, 255, var(--v-cupertino-glass-highlight)),
+    inset 1px 0 0 rgba(255, 255, 255, calc(var(--v-cupertino-glass-highlight) * 0.45)),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.035);
+}
+
+.lf-cupertino-glass-navigation::before,
+.lf-cupertino-glass-main::before,
+.lf-cupertino-glass-appbar::before {
+  --cupertino-material: var(--v-theme-header);
+  --cupertino-opacity: var(--v-cupertino-glass-chrome-opacity);
+}
+
+/* Paint inside the native layout slots so adjacent panels never touch.
+   Do not alter the drawer transform or the space reserved by Vuetify. */
+.lf-cupertino-glass-navigation,
+.lf-cupertino-glass-appbar {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  isolation: isolate;
+}
+
+.lf-cupertino-glass-navigation::before,
+.lf-cupertino-glass-appbar::before,
+.lf-cupertino-glass-main::before {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 16px;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.lf-cupertino-glass-navigation {
+  padding: 12px;
+  color: rgb(var(--v-theme-on-navigation));
+}
+
+.lf-cupertino-glass-appbar {
+  padding-inline: 12px;
+}
+
+.lf-cupertino-glass-main {
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+  padding-top: calc(var(--v-layout-top, 0px) + 16px);
+  padding-right: calc(var(--v-layout-right, 0px) + 16px);
+  padding-bottom: calc(var(--v-layout-bottom, 0px) + 16px);
+  padding-left: calc(var(--v-layout-left, 0px) + 16px);
+}
+
+.lf-cupertino-glass-main::before {
+  top: calc(var(--v-layout-top, 0px) + 4px);
+  right: calc(var(--v-layout-right, 0px) + 4px);
+  bottom: calc(var(--v-layout-bottom, 0px) + 4px);
+  left: calc(var(--v-layout-left, 0px) + 4px);
+}
+
+.lf-cupertino-glass-menu.v-overlay__content > .v-list,
+.lf-cupertino-glass-dialog.v-overlay__content > .v-card,
+.lf-cupertino-glass-tooltip.v-overlay__content {
+  --cupertino-opacity: var(--v-cupertino-glass-overlay-opacity);
+  font-family: var(--v-font-body);
+}
+
+.lf-cupertino-glass-menu.v-overlay__content > .v-list {
+  border-radius: 14px;
+  padding: 6px;
+}
+
+.lf-cupertino-glass-menu .v-list-item {
+  border-radius: 8px;
+  min-height: 38px;
+}
+
+.lf-cupertino-glass-table {
+  background: transparent;
+  font-variant-numeric: tabular-nums;
+  --v-table-header-height: 38px;
+  --v-table-row-height: 44px;
+}
+
+.lf-cupertino-glass-table thead {
+  background: rgb(var(--v-theme-surface-light));
+}
+
+/* Solid surfaces are the baseline; only opt into transparency when supported. */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .lf-cupertino-glass-sheet,
+  .lf-cupertino-glass-panel,
+  .lf-cupertino-glass-navigation::before,
+  .lf-cupertino-glass-appbar::before,
+  .lf-cupertino-glass-main::before,
+  .lf-cupertino-glass-menu.v-overlay__content > .v-list,
+  .lf-cupertino-glass-dialog.v-overlay__content > .v-card,
+  .lf-cupertino-glass-tooltip.v-overlay__content {
+    background: rgba(var(--cupertino-material), var(--cupertino-opacity));
+    -webkit-backdrop-filter: blur(22px) saturate(110%);
+    backdrop-filter: blur(22px) saturate(110%);
+  }
+}
+
+@media (max-width: 600px) {
+  .lf-cupertino-glass-panel,
+  .lf-cupertino-glass-sheet {
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .lf-cupertino-glass-sheet,
+  .lf-cupertino-glass-panel,
+  .lf-cupertino-glass-navigation::before,
+  .lf-cupertino-glass-appbar::before,
+  .lf-cupertino-glass-main::before,
+  .lf-cupertino-glass-menu.v-overlay__content > .v-list,
+  .lf-cupertino-glass-dialog.v-overlay__content > .v-card,
+  .lf-cupertino-glass-tooltip.v-overlay__content {
+    background: rgb(var(--cupertino-material));
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .lf-cupertino-glass-sheet,
+  .lf-cupertino-glass-panel,
+  .lf-cupertino-glass-navigation::before,
+  .lf-cupertino-glass-appbar::before,
+  .lf-cupertino-glass-main::before,
+  .lf-cupertino-glass-menu.v-overlay__content > .v-list,
+  .lf-cupertino-glass-dialog.v-overlay__content > .v-card,
+  .lf-cupertino-glass-tooltip.v-overlay__content {
+    border-color: CanvasText;
+  }
+}
+
+.lf-cupertino-glass-sheet {
+  --cupertino-opacity: 0.08;
+}
+
+.lf-cupertino-glass-button.v-btn {
+  letter-spacing: -0.01em;
+  font-size: 0.875rem;
+}
+
+.lf-cupertino-glass-button.v-btn--variant-flat {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 2px 5px rgba(0, 0, 0, 0.1);
+}
+
+.lf-cupertino-glass-input .v-field {
+  background: rgba(var(--v-theme-input), 0.45);
+  border: 1px solid rgba(var(--v-border-color), var(--v-border-opacity));
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.035);
+  font-size: 0.9375rem;
+  letter-spacing: -0.01em;
+  --v-input-control-height: 38px;
+}
+
+.lf-cupertino-glass-input .v-field__overlay {
+  opacity: 0;
+}
+
+.lf-cupertino-glass-input .v-field--focused {
+  border-color: rgb(var(--v-theme-primary));
+  outline: 3px solid rgba(var(--v-theme-primary), 0.2);
+  outline-offset: 1px;
+}
+
+.lf-cupertino-glass-input .v-field--error {
+  border-color: rgb(var(--v-theme-error));
+  outline-color: rgba(var(--v-theme-error), 0.2);
+}
+
+.lf-cupertino-glass-tabs.v-tabs--inset {
+  --v-tabs-inset-radius: 8px;
+  --v-tabs-slider-background: rgba(var(--v-theme-surface), 0.8);
+  background: rgba(var(--v-theme-on-surface), 0.06);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+@media (prefers-reduced-transparency: reduce), (forced-colors: active) {
+  .lf-cupertino-glass-input .v-field {
+    background: rgb(var(--v-theme-input));
+  }
+}
+
+/* Keep the theme font on teleported surfaces as well as the app root. */
+.lf-cupertino-glass,
+.lf-cupertino-glass-menu,
+.lf-cupertino-glass-dialog,
+.lf-cupertino-glass-tooltip {
+  font-family: var(--v-font-body);
+}
+
+.lf-cupertino-glass :where(button, input, textarea, select) {
+  font-family: inherit;
+}

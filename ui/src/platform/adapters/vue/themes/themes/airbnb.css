@@ -1,0 +1,49 @@
+/* These profiles supplement native props. No changes to layout positioning,
+   focus/disabled states, or component event handling. Teleported surfaces get
+   their own profile class through Vuetify's contentClass prop. */
+.lf-airbnb {
+  letter-spacing: -0.015em;
+}
+
+.lf-airbnb :where(h1, h2, h3, .v-card-title) {
+  letter-spacing: -0.035em;
+}
+
+.lf-airbnb-card {
+  box-shadow: 0 6px 24px rgba(var(--v-theme-on-surface), 0.07);
+}
+
+.lf-airbnb-action.v-btn--variant-flat {
+  background-image: linear-gradient(110deg, transparent, rgba(var(--v-theme-accent), 0.4));
+}
+
+.lf-airbnb .v-label {
+  color: rgb(var(--v-theme-on-surface));
+  font-size: 0.875rem;
+}
+
+.lf-airbnb-table {
+  --v-table-header-height: 48px;
+  --v-table-row-height: 64px;
+}
+
+.lf-airbnb-table thead {
+  background: rgb(var(--v-theme-surface-light));
+}
+
+.lf-airbnb-menu > .v-list,
+.lf-airbnb-dialog > .v-card {
+  border-radius: 20px;
+  box-shadow: 0 8px 32px rgba(var(--v-theme-on-surface), 0.12);
+}
+
+/* Respect the user's motion preference for decorative transitions. */
+@media (prefers-reduced-motion: no-preference) {
+  .lf-airbnb-card {
+    transition: box-shadow 180ms ease;
+  }
+
+  .lf-airbnb-card:hover {
+    box-shadow: 0 10px 32px rgba(var(--v-theme-on-surface), 0.11);
+  }
+}

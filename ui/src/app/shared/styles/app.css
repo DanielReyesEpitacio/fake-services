@@ -1,0 +1,62 @@
+/* Estilos propios de Fake Services, independientes del look and feel. */
+
+.mono,
+code,
+pre,
+kbd {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  font-feature-settings: normal;
+}
+
+code.inline {
+  font-size: 0.86em;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgba(var(--v-theme-on-surface), 0.07);
+}
+
+pre.code-block {
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  max-height: 420px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 10px;
+  background: rgba(var(--v-theme-on-surface), 0.05);
+}
+
+.text-truncate-cell {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clickable-rows tbody tr {
+  cursor: pointer;
+}
+
+.gap-1 { gap: 4px; }
+.gap-2 { gap: 8px; }
+.gap-3 { gap: 12px; }
+.gap-4 { gap: 16px; }
+
+.f-field {
+  min-width: 0;
+}
+.f-field__label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: rgba(var(--v-theme-on-surface), var(--v-medium-emphasis-opacity));
+}
+.mono input,
+.mono textarea,
+.mono .v-select__selection-text {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.8125rem;
+}
