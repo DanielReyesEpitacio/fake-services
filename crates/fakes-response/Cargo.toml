@@ -1,0 +1,22 @@
+[package]
+name = "fakes-response"
+description = "Motor de respuestas: plantillas seguras y construcción de respuestas"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fakes-domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+minijinja.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+fastrand.workspace = true
+base64.workspace = true
+mime_guess.workspace = true
+regex.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

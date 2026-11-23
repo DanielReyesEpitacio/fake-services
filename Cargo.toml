@@ -1,0 +1,81 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/fakes-domain",
+    "crates/fakes-config",
+    "crates/fakes-matching",
+    "crates/fakes-response",
+    "crates/fakes-store",
+    "crates/fakes-server",
+    "crates/fakes-app",
+    "crates/fakes-api",
+    "crates/fakes-cli",
+    "apps/desktop",
+]
+# La app de escritorio necesita dependencias del sistema (WebKitGTK en Linux).
+# `cargo build` / `cargo test` sin argumentos compilan solo el núcleo y el CLI.
+default-members = [
+    "crates/fakes-domain",
+    "crates/fakes-config",
+    "crates/fakes-matching",
+    "crates/fakes-response",
+    "crates/fakes-store",
+    "crates/fakes-server",
+    "crates/fakes-app",
+    "crates/fakes-api",
+    "crates/fakes-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/fake-services/fake-services"
+authors = ["Fake Services contributors"]
+
+[workspace.dependencies]
+fakes-domain = { path = "crates/fakes-domain" }
+fakes-config = { path = "crates/fakes-config" }
+fakes-matching = { path = "crates/fakes-matching" }
+fakes-response = { path = "crates/fakes-response" }
+fakes-store = { path = "crates/fakes-store" }
+fakes-server = { path = "crates/fakes-server" }
+fakes-app = { path = "crates/fakes-app" }
+fakes-api = { path = "crates/fakes-api" }
+
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+schemars = { version = "1", features = ["preserve_order"] }
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["macros"] }
+http = "1"
+bytes = "1"
+http-body-util = "0.1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+regex = "1"
+minijinja = { version = "2", features = ["json", "builtins", "fuel", "urlencode", "speedups"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros", "json"] }
+arc-swap = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+uuid = { version = "1", features = ["v4", "v7"] }
+fastrand = "2"
+base64 = "0.22"
+form_urlencoded = "1"
+percent-encoding = "2"
+multer = "3"
+jsonschema = { version = "0.63", default-features = false }
+directories = "6"
+rust-embed = "8"
+mime_guess = "2"
+clap = { version = "4", features = ["derive", "env"] }
+futures-util = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }
+tempfile = "3"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

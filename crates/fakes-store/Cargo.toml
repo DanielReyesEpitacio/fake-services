@@ -1,0 +1,21 @@
+[package]
+name = "fakes-store"
+description = "Persistencia de estado de ejecución (historial, estado) en SQLite"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+base64.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true
+tempfile.workspace = true

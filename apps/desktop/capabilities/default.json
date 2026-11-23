@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "La ventana carga la interfaz desde la API local; no necesita acceso a comandos de Tauri.",
+  "windows": ["main"],
+  "permissions": []
+}

@@ -1,0 +1,11 @@
+/target
+node_modules/
+/ui/dist/*
+!/ui/dist/.gitkeep
+apps/desktop/gen/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+.idea/
+.vscode/

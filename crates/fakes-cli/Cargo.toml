@@ -1,0 +1,20 @@
+[package]
+name = "fakes-cli"
+description = "CLI de Fake Services: `fakes serve`"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fakes"
+path = "src/main.rs"
+
+[dependencies]
+fakes-api.workspace = true
+fakes-app.workspace = true
+fakes-config.workspace = true
+clap.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true

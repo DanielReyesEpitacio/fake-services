@@ -1,0 +1,14 @@
+[package]
+name = "fakes-matching"
+description = "Motor de coincidencia de solicitudes: enrutamiento, validación y escenarios"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+fakes-domain.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+jsonschema.workspace = true
+base64.workspace = true
+tracing.workspace = true
