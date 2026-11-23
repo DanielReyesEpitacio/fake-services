@@ -44,6 +44,8 @@ pub struct Workspace {
     pub variables: BTreeMap<String, String>,
     #[serde(default)]
     pub history: HistorySettings,
+    #[serde(default)]
+    pub webhooks: WebhookSettings,
 }
 
 fn schema_version() -> u32 {
@@ -60,6 +62,33 @@ impl Workspace {
             server: ServerSettings::default(),
             variables: BTreeMap::new(),
             history: HistorySettings::default(),
+            webhooks: WebhookSettings::default(),
+        }
+    }
+}
+
+/// Política de red para las solicitudes que hacen los workflows (protección SSRF).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WebhookSettings {
+    /// Permitir `localhost` / `127.0.0.1` (lo normal para callbacks en desarrollo).
+    #[serde(default = "default_true")]
+    pub allow_loopback: bool,
+    /// Permitir redes privadas (10.x, 172.16-31.x, 192.168.x, fc00::/7).
+    #[serde(default)]
+    pub allow_private_networks: bool,
+    /// Hosts o IPs permitidos aunque la política los bloquee (p. ej. `host.docker.internal`).
+    /// Las direcciones de metadatos de nube nunca se permiten.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_hosts: Vec<String>,
+}
+
+impl Default for WebhookSettings {
+    fn default() -> Self {
+        Self {
+            allow_loopback: true,
+            allow_private_networks: false,
+            allowed_hosts: Vec::new(),
         }
     }
 }
@@ -190,6 +219,9 @@ pub struct Service {
     /// Los endpoints se guardan en archivos propios; aquí se cargan en memoria.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub endpoints: Vec<Endpoint>,
+    /// Los workflows se guardan en archivos propios; aquí se cargan en memoria.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workflows: Vec<crate::workflow::Workflow>,
 }
 
 /// Autenticación que el servicio simulado exige a sus clientes.
@@ -389,6 +421,9 @@ pub struct Scenario {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<Rule>,
     pub response: ResponseDef,
+    /// Workflows que inicia este escenario.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workflows: Vec<crate::workflow::WorkflowLink>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]

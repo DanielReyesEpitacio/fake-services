@@ -44,6 +44,35 @@ pub trait RequestSink: Send + Sync + 'static {
     fn record(&self, record: RequestRecord);
 }
 
+/// Workflow que un escenario pide iniciar.
+#[derive(Debug, Clone)]
+pub struct WorkflowTrigger {
+    pub service_id: String,
+    pub workflow_id: String,
+    pub when: fakes_domain::StartWhen,
+    /// Entrada sin renderizar; el motor la renderiza con `scope`.
+    pub input: std::collections::BTreeMap<String, serde_json::Value>,
+    /// Contexto de la solicitud: `request`, `response`, `endpoint`, `scenario`...
+    pub scope: serde_json::Value,
+}
+
+pub type StartFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send>>;
+
+/// Inicia workflows (lo implementa la capa de aplicación con el motor).
+pub trait WorkflowStarter: Send + Sync + 'static {
+    /// Devuelve el id de la ejecución creada.
+    fn start(&self, trigger: WorkflowTrigger) -> StartFuture;
+}
+
+/// No inicia nada (pruebas).
+pub struct NoWorkflows;
+impl WorkflowStarter for NoWorkflows {
+    fn start(&self, t: WorkflowTrigger) -> StartFuture {
+        Box::pin(async move { Err(format!("workflows no disponibles ({})", t.workflow_id)) })
+    }
+}
+
 /// Sumidero que descarta todo (pruebas).
 pub struct NullSink;
 impl RequestSink for NullSink {
@@ -83,13 +112,23 @@ pub fn display_host(host: &str) -> &str {
 pub struct ServerState {
     pub snapshot: ArcSwap<Snapshot>,
     pub sink: Arc<dyn RequestSink>,
+    pub workflows: Arc<dyn WorkflowStarter>,
 }
 
 impl ServerState {
     pub fn new(snapshot: Snapshot, sink: Arc<dyn RequestSink>) -> Arc<Self> {
+        Self::with_workflows(snapshot, sink, Arc::new(NoWorkflows))
+    }
+
+    pub fn with_workflows(
+        snapshot: Snapshot,
+        sink: Arc<dyn RequestSink>,
+        workflows: Arc<dyn WorkflowStarter>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             snapshot: ArcSwap::from_pointee(snapshot),
             sink,
+            workflows,
         })
     }
 }

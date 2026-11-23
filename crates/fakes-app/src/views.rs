@@ -41,6 +41,7 @@ pub struct ServiceSummary {
     /// URL base local del servicio simulado.
     pub url: String,
     pub endpoint_count: usize,
+    pub workflow_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -89,6 +90,9 @@ pub struct AppStatus {
     pub services_running: usize,
     pub endpoints_total: usize,
     pub requests_total: i64,
+    /// Ejecuciones de workflows pendientes, en curso o esperando.
+    pub executions_active: i64,
+    pub workflows_total: usize,
     pub problems: Vec<LoadProblem>,
 }
 
@@ -98,4 +102,39 @@ pub struct AppStatus {
 pub struct ValidationReport {
     pub valid: bool,
     pub issues: Vec<fakes_domain::Issue>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowUsage {
+    pub endpoint_id: String,
+    pub scenario_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowSummary {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub enabled: bool,
+    pub step_count: usize,
+    pub schedule_every_ms: Option<u64>,
+    /// Escenarios que inician este workflow.
+    pub used_by: Vec<WorkflowUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkflowView {
+    pub service_id: String,
+    pub workflow: fakes_domain::Workflow,
+    pub used_by: Vec<WorkflowUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionDetail {
+    pub execution: fakes_store::ExecutionRecord,
+    pub timeline: Vec<fakes_store::TimelineEntry>,
 }

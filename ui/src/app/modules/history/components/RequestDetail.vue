@@ -58,6 +58,12 @@ function asCurl() {
   copyText(parts.join(' \\\n  '))
 }
 
+/** Ejecuciones de workflows que inició esta solicitud (header de respuesta). */
+const executionIds = computed(() => {
+  const h = rec.value?.responseHeaders.find(([k]) => k === 'x-fakes-executions')
+  return h ? h[1].split(',').map((s) => s.trim()).filter(Boolean) : []
+})
+
 const sections = computed(() =>
   rec.value
     ? [
@@ -86,6 +92,12 @@ const sections = computed(() =>
         <VBtn size="small" variant="tonal" prepend-icon="mdi-console" @click="asCurl">Copiar como curl</VBtn>
       </div>
       <VAlert v-if="rec.message" type="warning" variant="tonal" density="compact">{{ rec.message }}</VAlert>
+      <VAlert v-if="executionIds.length" type="info" variant="tonal" density="compact" icon="mdi-sitemap-outline">
+        Inició {{ executionIds.length === 1 ? 'una ejecución' : `${executionIds.length} ejecuciones` }} de workflow:
+        <RouterLink v-for="e in executionIds" :key="e" :to="`/ejecuciones/${e}`" class="d-block mono text-body-small" @click="id = null">
+          {{ e }}
+        </RouterLink>
+      </VAlert>
 
       <VTable density="compact">
         <tbody>

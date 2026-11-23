@@ -11,6 +11,7 @@ const ws = ref<Workspace | null>(null)
 const original = ref('')
 const issues = ref<Issue[]>([])
 const redactText = ref('')
+const allowedHostsText = ref('')
 
 const hostItems = [
   { title: '127.0.0.1 (solo este equipo)', value: '127.0.0.1' },
@@ -22,8 +23,10 @@ async function load() {
     const v = await api.activeWorkspace()
     v.workspace.variables ??= {}
     v.workspace.description ??= ''
+    v.workspace.webhooks.allowedHosts ??= []
     ws.value = v.workspace
     redactText.value = v.workspace.history.redactHeaders.join(', ')
+    allowedHostsText.value = (v.workspace.webhooks.allowedHosts ?? []).join(', ')
     original.value = JSON.stringify(ws.value)
   } catch (e) {
     toastError(e)
@@ -32,20 +35,29 @@ async function load() {
 load()
 
 const redactList = () => redactText.value.split(',').map((s) => s.trim()).filter(Boolean)
+const hostsList = () => allowedHostsText.value.split(',').map((s) => s.trim()).filter(Boolean)
 
 const dirty = computed(() => {
   if (!ws.value) return false
-  return JSON.stringify({ ...ws.value, history: { ...ws.value.history, redactHeaders: redactList() } }) !== original.value
+  return (
+    JSON.stringify({
+      ...ws.value,
+      history: { ...ws.value.history, redactHeaders: redactList() },
+      webhooks: { ...ws.value.webhooks, allowedHosts: hostsList() },
+    }) !== original.value
+  )
 })
 
 async function save() {
   if (!ws.value) return
   issues.value = []
   ws.value.history.redactHeaders = redactList()
+  ws.value.webhooks.allowedHosts = hostsList()
   try {
     const saved = await api.updateWorkspace(ws.value)
     saved.variables ??= {}
     saved.description ??= ''
+    saved.webhooks.allowedHosts ??= []
     ws.value = saved
     original.value = JSON.stringify(ws.value)
     toast('Ajustes guardados')
@@ -90,6 +102,21 @@ const maxBodyMb = computed({
             Otros equipos de tu red podrán llamar a las simulaciones. Úsalo solo en redes de confianza.
           </VAlert>
           <VSwitch v-model="ws.server.cors" label="Responder CORS automáticamente (para frontends en el navegador)" color="primary" hide-details />
+        </VCardText>
+      </VCard>
+
+      <VCard title="Webhooks de los workflows" subtitle="Protección SSRF: a dónde pueden llamar las solicitudes HTTP de los workflows.">
+        <VCardText class="d-flex flex-column gap-3">
+          <VSwitch v-model="ws!.webhooks.allowLoopback" label="Permitir localhost (127.0.0.1, ::1)" color="primary" hide-details />
+          <VSwitch v-model="ws!.webhooks.allowPrivateNetworks" label="Permitir redes privadas (10.x, 172.16-31.x, 192.168.x)" color="primary" hide-details />
+          <FTextField
+            v-model="allowedHostsText"
+            label="Hosts permitidos siempre"
+            placeholder="host.docker.internal, 192.168.1.20"
+            class="mono"
+            hint="Separados por comas. Las direcciones de metadatos de nube (169.254.169.254) nunca se permiten."
+            persistent-hint
+          />
         </VCardText>
       </VCard>
 

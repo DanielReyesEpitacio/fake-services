@@ -17,7 +17,8 @@ use http::{HeaderMap, HeaderName, HeaderValue, Method, Request, StatusCode};
 use serde_json::{Value, json};
 
 use crate::body::parse_body;
-use crate::{ServerState, Snapshot, display_host};
+use crate::{ServerState, Snapshot, WorkflowTrigger, display_host};
+use fakes_domain::{StartWhen, WorkflowLink};
 
 /// Rutas reservadas del propio simulador (`/__fakes/health`).
 pub const RESERVED_PREFIX: &str = "/__fakes";
@@ -44,6 +45,12 @@ struct Handled {
     service_id: Option<String>,
     endpoint_id: Option<String>,
     scenario_id: Option<String>,
+    /// Workflows a iniciar al completar la respuesta.
+    links: Vec<WorkflowLink>,
+    /// Contexto de plantillas de la solicitud (para los workflows).
+    scope: Value,
+    /// Ejecuciones iniciadas por esta solicitud.
+    executions: Vec<String>,
 }
 
 impl Handled {
@@ -64,6 +71,9 @@ impl Handled {
             service_id: None,
             endpoint_id: None,
             scenario_id: None,
+            links: Vec::new(),
+            scope: Value::Null,
+            executions: Vec::new(),
         }
     }
 
@@ -315,6 +325,9 @@ async fn process(ctx: &ListenerCtx, snap: &Snapshot, req: &mut IncomingRequest) 
                 service_id: None,
                 endpoint_id: None,
                 scenario_id: None,
+                links: Vec::new(),
+                scope: Value::Null,
+                executions: Vec::new(),
             },
             Err(e) => Handled::error(
                 500,
@@ -327,6 +340,22 @@ async fn process(ctx: &ListenerCtx, snap: &Snapshot, req: &mut IncomingRequest) 
         .for_service(svc);
     handled.endpoint_id = Some(endpoint.endpoint.id.clone());
     handled.scenario_id = Some(scenario.id.clone());
+
+    if handled.outcome == Outcome::Matched {
+        let (now, later): (Vec<WorkflowLink>, Vec<WorkflowLink>) = scenario
+            .workflows
+            .iter()
+            .filter(|l| l.enabled)
+            .cloned()
+            .partition(|l| l.when == StartWhen::RequestReceived);
+        for link in now {
+            if let Some(id) = start_workflow(ctx, &svc.service.id, link, ctx_value.clone()).await {
+                handled.executions.push(id);
+            }
+        }
+        handled.links = later;
+        handled.scope = ctx_value;
+    }
     handled
 }
 
@@ -354,6 +383,9 @@ fn validation_response(
                     service_id: None,
                     endpoint_id: None,
                     scenario_id: None,
+                    links: Vec::new(),
+                    scope: Value::Null,
+                    executions: Vec::new(),
                 },
                 Err(e) => Handled::error(
                     500,
@@ -387,6 +419,9 @@ fn validation_response(
                 service_id: None,
                 endpoint_id: None,
                 scenario_id: None,
+                links: Vec::new(),
+                scope: Value::Null,
+                executions: Vec::new(),
             }
         }
     }
@@ -436,11 +471,33 @@ fn template_context(
     })
 }
 
+async fn start_workflow(
+    ctx: &ListenerCtx,
+    service_id: &str,
+    link: WorkflowLink,
+    scope: Value,
+) -> Option<String> {
+    let trigger = WorkflowTrigger {
+        service_id: service_id.to_string(),
+        workflow_id: link.workflow_id.clone(),
+        when: link.when,
+        input: link.input,
+        scope,
+    };
+    match ctx.state.workflows.start(trigger).await {
+        Ok(id) => Some(id),
+        Err(e) => {
+            tracing::warn!(workflow = %link.workflow_id, "no se pudo iniciar el workflow: {e}");
+            None
+        }
+    }
+}
+
 async fn finish(
     ctx: &ListenerCtx,
     snap: &Snapshot,
     req: &IncomingRequest,
-    handled: Handled,
+    mut handled: Handled,
     started: Instant,
     origin: Option<&str>,
     cors: bool,
@@ -448,6 +505,32 @@ async fn finish(
     let delay = handled.rendered.delay_ms.min(MAX_DELAY_MS);
     if delay > 0 {
         tokio::time::sleep(Duration::from_millis(delay)).await;
+    }
+
+    // Workflows "al completar la respuesta": reciben la respuesta en su contexto.
+    if !handled.links.is_empty() {
+        let mut scope = std::mem::take(&mut handled.scope);
+        let headers: serde_json::Map<String, Value> = handled
+            .rendered
+            .headers
+            .iter()
+            .map(|(k, v)| (k.to_ascii_lowercase(), Value::String(v.clone())))
+            .collect();
+        let body = serde_json::from_slice::<Value>(&handled.rendered.body).unwrap_or_else(|_| {
+            Value::String(String::from_utf8_lossy(&handled.rendered.body).into_owned())
+        });
+        scope["response"] = json!({
+            "status": handled.rendered.status,
+            "headers": headers,
+            "body": body,
+        });
+        if let Some(service_id) = handled.service_id.clone() {
+            for link in std::mem::take(&mut handled.links) {
+                if let Some(id) = start_workflow(ctx, &service_id, link, scope.clone()).await {
+                    handled.executions.push(id);
+                }
+            }
+        }
     }
 
     let mut resp = Response::new(Body::from(Bytes::from(handled.rendered.body.clone())));
@@ -461,6 +544,11 @@ async fn finish(
         ) {
             headers.append(name, value);
         }
+    }
+    if !handled.executions.is_empty()
+        && let Ok(v) = HeaderValue::try_from(handled.executions.join(","))
+    {
+        headers.insert("x-fakes-executions", v);
     }
     if let Some(s) = &handled.scenario_id
         && let Ok(v) = HeaderValue::try_from(s.as_str())

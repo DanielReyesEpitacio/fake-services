@@ -29,6 +29,7 @@ fn scenario(id: &str, rules: Vec<Rule>, response: ResponseDef) -> Scenario {
         description: String::new(),
         enabled: true,
         rule_mode: RuleMode::All,
+        workflows: vec![],
         rules,
         response,
     }
@@ -89,6 +90,7 @@ fn mifiel() -> Service {
         auto_start: true,
         variables: Default::default(),
         auth: AuthConfig::Bearer { token: None },
+        workflows: vec![],
         endpoints: vec![sign],
     }
 }

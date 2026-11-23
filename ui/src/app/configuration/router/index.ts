@@ -27,6 +27,23 @@ const router = createRouter({
       props: true,
     },
     {
+      path: '/servicios/:sid/workflows/:wid',
+      name: RouteNames.workflow,
+      component: () => import('@/app/modules/workflows/pages/WorkflowEditorPage.vue'),
+      props: true,
+    },
+    {
+      path: '/ejecuciones',
+      name: RouteNames.executions,
+      component: () => import('@/app/modules/executions/pages/ExecutionsPage.vue'),
+    },
+    {
+      path: '/ejecuciones/:id',
+      name: RouteNames.execution,
+      component: () => import('@/app/modules/executions/pages/ExecutionDetailPage.vue'),
+      props: true,
+    },
+    {
       path: '/historial',
       name: RouteNames.history,
       component: () => import('@/app/modules/history/pages/HistoryPage.vue'),

@@ -9,6 +9,7 @@ fn scenario(id: &str, rules: Vec<Rule>, status: u16) -> Scenario {
         description: String::new(),
         enabled: true,
         rule_mode: RuleMode::All,
+        workflows: vec![],
         rules,
         response: ResponseDef::json(status, json!({"s": id})),
     }
@@ -42,6 +43,7 @@ fn service(id: &str, prefix: &str, endpoints: Vec<Endpoint>) -> Service {
         auto_start: true,
         variables: Default::default(),
         auth: AuthConfig::None,
+        workflows: vec![],
         endpoints,
     }
 }

@@ -2,7 +2,7 @@
 
 import { reactive, readonly, ref } from 'vue'
 import { api, ApiError, subscribeEvents } from '@/infrastructure/api/client.ts'
-import type { AppStatus, RequestSummary, ServiceSummary } from '@/infrastructure/api/types.ts'
+import type { AppStatus, ExecutionSummary, RequestSummary, ServiceSummary } from '@/infrastructure/api/types.ts'
 
 export interface ToastMessage {
   text: string
@@ -50,6 +50,14 @@ export async function refresh() {
 let started = false
 const requestListeners = new Set<(r: RequestSummary) => void>()
 
+const executionListeners = new Set<(e: ExecutionSummary) => void>()
+
+/** Cambios de ejecuciones de workflows en vivo. */
+export function onExecution(fn: (e: ExecutionSummary) => void): () => void {
+  executionListeners.add(fn)
+  return () => executionListeners.delete(fn)
+}
+
 export function onRequest(fn: (r: RequestSummary) => void): () => void {
   requestListeners.add(fn)
   return () => requestListeners.delete(fn)
@@ -71,6 +79,11 @@ export function startLive() {
       state.recent.splice(50)
       if (state.status) state.status.requestsTotal++
       requestListeners.forEach((fn) => fn(ev.data))
+    } else if (ev.type === 'execution') {
+      executionListeners.forEach((fn) => fn(ev.data))
+      debounced()
+    } else if (ev.type === 'workflow_event') {
+      // Los eventos emitidos se ven en la línea de tiempo de la ejecución.
     } else {
       if (ev.type === 'config_changed') state.configVersion++
       debounced()

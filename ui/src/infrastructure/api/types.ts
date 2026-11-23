@@ -18,6 +18,12 @@ export interface HistorySettings {
   maxBodyCaptureBytes: number
 }
 
+export interface WebhookSettings {
+  allowLoopback: boolean
+  allowPrivateNetworks: boolean
+  allowedHosts?: string[]
+}
+
 export interface Workspace {
   schemaVersion?: number
   id: string
@@ -26,6 +32,7 @@ export interface Workspace {
   server: ServerSettings
   variables?: Record<string, string>
   history: HistorySettings
+  webhooks: WebhookSettings
 }
 
 export type AuthConfig =
@@ -46,6 +53,7 @@ export interface Service {
   variables?: Record<string, string>
   auth?: AuthConfig
   endpoints?: Endpoint[]
+  workflows?: Workflow[]
 }
 
 export interface ParamSpec {
@@ -114,6 +122,7 @@ export interface Scenario {
   ruleMode?: 'all' | 'any'
   rules?: Rule[]
   response: ResponseDef
+  workflows?: WorkflowLink[]
 }
 
 export interface Endpoint {
@@ -151,6 +160,7 @@ export interface ServiceSummary {
   running: boolean
   url: string
   endpointCount: number
+  workflowCount: number
 }
 
 export interface ServiceView {
@@ -213,6 +223,8 @@ export interface AppStatus {
   servicesRunning: number
   endpointsTotal: number
   requestsTotal: number
+  executionsActive: number
+  workflowsTotal: number
   problems: LoadProblem[]
 }
 
@@ -265,5 +277,154 @@ export interface RequestRecord extends RequestSummary {
 
 export type AppEvent =
   | { type: 'request'; data: RequestSummary }
+  | { type: 'execution'; data: ExecutionSummary }
+  | {
+      type: 'workflow_event'
+      data: { execution_id: string; workflow_id: string; service_id: string; event: string; data: unknown }
+    }
   | { type: 'config_changed'; data: { workspace_id: string } }
   | { type: 'runtime_changed'; data: { workspace_id: string } }
+
+// -- workflows ------------------------------------------------------------
+
+export type StartWhen = 'requestReceived' | 'responseSent'
+
+export interface WorkflowLink {
+  workflowId: string
+  when?: StartWhen
+  input?: Record<string, unknown>
+  enabled?: boolean
+}
+
+export interface Retry {
+  maxAttempts: number
+  backoffMs?: number
+  multiplier?: number
+}
+
+export type StepBody =
+  | { type: 'none' }
+  | { type: 'json'; content: unknown }
+  | { type: 'text'; content: string; contentType?: string | null }
+  | { type: 'form'; fields: Record<string, string> }
+
+export interface WorkflowCondition {
+  path: string
+  operator: Operator
+  value?: unknown
+}
+
+interface StepBase {
+  id: string
+  name?: string
+  next?: string | null
+}
+
+export type Step = StepBase &
+  (
+    | { type: 'wait'; durationMs: number }
+    | {
+        type: 'http'
+        method: HttpMethod
+        url: string
+        headers?: Record<string, string>
+        query?: Record<string, string>
+        body?: StepBody
+        timeoutMs?: number
+        delayMs?: number
+        retry?: Retry
+        expectedStatus?: string[]
+        continueOnError?: boolean
+      }
+    | { type: 'emit'; event: string; data?: unknown }
+    | { type: 'setVariables'; values: Record<string, unknown> }
+    | {
+        type: 'condition'
+        conditions: WorkflowCondition[]
+        mode?: 'all' | 'any'
+        onTrue?: string | null
+        onFalse?: string | null
+      }
+    | { type: 'runWorkflow'; workflowId: string; input?: Record<string, unknown>; wait?: boolean }
+    | { type: 'fail'; message: string }
+    | { type: 'end' }
+  )
+
+export type StepType = Step['type']
+
+export interface Workflow {
+  schemaVersion?: number
+  id: string
+  name: string
+  description?: string
+  enabled: boolean
+  variables?: Record<string, unknown>
+  schedule?: { everyMs: number } | null
+  steps: Step[]
+  maxSteps?: number
+}
+
+export interface WorkflowUsage {
+  endpointId: string
+  scenarioId: string
+}
+
+export interface WorkflowSummary {
+  id: string
+  name: string
+  description: string
+  enabled: boolean
+  stepCount: number
+  scheduleEveryMs: number | null
+  usedBy: WorkflowUsage[]
+}
+
+export interface WorkflowView {
+  serviceId: string
+  workflow: Workflow
+  usedBy: WorkflowUsage[]
+}
+
+export type ExecutionStatus = 'pending' | 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled'
+export type TriggerKind = 'manual' | 'request_received' | 'response_sent' | 'schedule' | 'workflow'
+
+export interface ExecutionSummary {
+  id: string
+  serviceId: string
+  workflowId: string
+  workflowName: string
+  status: ExecutionStatus
+  trigger: TriggerKind
+  parentId: string | null
+  currentStep: string | null
+  stepsExecuted: number
+  wakeAtMs: number | null
+  error: string | null
+  createdMs: number
+  updatedMs: number
+  finishedMs: number | null
+}
+
+export interface ExecutionRecord extends ExecutionSummary {
+  workspaceId: string
+  depth: number
+  pc: number
+  attempt: number
+  waitingFor: string | null
+  context: Record<string, unknown>
+  definition: Workflow
+}
+
+export interface TimelineEntry {
+  seq: number
+  tsMs: number
+  kind: string
+  stepId: string | null
+  message: string
+  data?: unknown
+}
+
+export interface ExecutionDetail {
+  execution: ExecutionRecord
+  timeline: TimelineEntry[]
+}

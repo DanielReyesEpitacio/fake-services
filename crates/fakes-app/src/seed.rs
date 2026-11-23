@@ -3,6 +3,19 @@
 use fakes_domain::*;
 use serde_json::json;
 
+fn workflow(v: serde_json::Value) -> Workflow {
+    serde_json::from_value(v).expect("workflow de ejemplo válido")
+}
+
+fn link(workflow_id: &str) -> WorkflowLink {
+    WorkflowLink {
+        workflow_id: workflow_id.into(),
+        when: StartWhen::ResponseSent,
+        input: Default::default(),
+        enabled: true,
+    }
+}
+
 fn scenario(id: &str, name: &str, rules: Vec<Rule>, response: ResponseDef) -> Scenario {
     Scenario {
         id: id.into(),
@@ -10,6 +23,7 @@ fn scenario(id: &str, name: &str, rules: Vec<Rule>, response: ResponseDef) -> Sc
         description: String::new(),
         enabled: true,
         rule_mode: RuleMode::All,
+        workflows: vec![],
         rules,
         response,
     }
@@ -146,6 +160,120 @@ pub fn example_service() -> Service {
         example: Some(json!({"monto": 1500, "moneda": "MXN"})),
     });
 
+    // Flujo asíncrono tipo MiFiel: responde 201 y luego notifica por webhook.
+    let mut firmar = endpoint(
+        "post-documentos-id-firmar",
+        "Solicitar firma (con webhooks)",
+        HttpMethod::Post,
+        "/documentos/{id}/firmar",
+        vec![
+            {
+                let mut sc = scenario(
+                    "rechazada",
+                    "Firma rechazada (firmante con «rechazo» en el correo)",
+                    vec![Rule {
+                        source: RuleSource::Body,
+                        key: "firmante".into(),
+                        operator: Operator::Contains,
+                        value: Some(json!("rechazo")),
+                    }],
+                    ResponseDef::json(
+                        201,
+                        json!({"id": "{{ request.params.id }}", "estado": "pendiente"}),
+                    ),
+                );
+                sc.workflows = vec![link("notificar-rechazo")];
+                sc
+            },
+            {
+                let mut sc = scenario(
+                    "ok",
+                    "Firma exitosa",
+                    vec![],
+                    ResponseDef::json(
+                        201,
+                        json!({
+                            "id": "{{ request.params.id }}",
+                            "solicitud": "sol_{{ random_hex(10) }}",
+                            "estado": "pendiente"
+                        }),
+                    ),
+                );
+                sc.workflows = vec![link("notificar-firma")];
+                sc
+            },
+        ],
+    );
+    firmar.description = "Responde 201 y después envía webhooks al callback_url: «pendiente» a los 5 s y «firmado» a los 15 s. Si omites callback_url, se usa el receptor de este mismo servicio.".into();
+    firmar.request.body = Some(BodySpec {
+        kind: BodyKind::Json,
+        required: false,
+        schema: Some(json!({
+            "type": "object",
+            "properties": {
+                "callback_url": {"type": "string"},
+                "firmante": {"type": "string"}
+            }
+        })),
+        example: Some(
+            json!({"callback_url": "http://127.0.0.1:4000/ejemplo/webhooks", "firmante": "ana@example.com"}),
+        ),
+    });
+
+    let receptor = endpoint(
+        "post-webhooks",
+        "Receptor de webhooks (para probar)",
+        HttpMethod::Post,
+        "/webhooks",
+        vec![scenario(
+            "ok",
+            "Recibido",
+            vec![],
+            ResponseDef::json(200, json!({"recibido": true})),
+        )],
+    );
+
+    let destino = "{{ request.body.callback_url or (service.url ~ '/webhooks') }}";
+    let notificar = workflow(json!({
+        "id": "notificar-firma",
+        "name": "Notificar firma",
+        "description": "Avisa al callback que el documento está pendiente y, después, firmado.",
+        "steps": [
+            {"id": "espera-pendiente", "type": "wait", "durationMs": 5000},
+            {"id": "pendiente", "type": "http", "method": "POST", "url": destino,
+             "body": {"type": "json", "content": {
+                 "evento": "documento.pendiente",
+                 "documento": "{{ response.body.id }}",
+                 "solicitud": "{{ response.body.solicitud }}"
+             }},
+             "retry": {"maxAttempts": 3, "backoffMs": 2000}},
+            {"id": "espera-firma", "type": "wait", "durationMs": 15000},
+            {"id": "firmado", "type": "http", "method": "POST", "url": destino,
+             "body": {"type": "json", "content": {
+                 "evento": "documento.firmado",
+                 "documento": "{{ response.body.id }}",
+                 "solicitud": "{{ response.body.solicitud }}",
+                 "firmado_en": "{{ now() }}"
+             }},
+             "retry": {"maxAttempts": 3, "backoffMs": 2000}},
+            {"id": "aviso", "type": "emit", "event": "documento.firmado", "data": {"documento": "{{ response.body.id }}"}}
+        ]
+    }));
+    let rechazo = workflow(json!({
+        "id": "notificar-rechazo",
+        "name": "Notificar rechazo",
+        "description": "Avisa al callback que el firmante rechazó el documento.",
+        "steps": [
+            {"id": "espera", "type": "wait", "durationMs": 5000},
+            {"id": "rechazado", "type": "http", "method": "POST", "url": destino,
+             "body": {"type": "json", "content": {
+                 "evento": "documento.rechazado",
+                 "documento": "{{ response.body.id }}",
+                 "motivo": "El firmante rechazó el documento"
+             }}}
+        ]
+    }));
+
     Service {
         schema_version: SCHEMA_VERSION,
         id: "ejemplo".into(),
@@ -157,6 +285,7 @@ pub fn example_service() -> Service {
         auto_start: true,
         variables: Default::default(),
         auth: AuthConfig::None,
-        endpoints: vec![hola, usuario, crear],
+        workflows: vec![notificar, rechazo],
+        endpoints: vec![hola, usuario, crear, firmar, receptor],
     }
 }

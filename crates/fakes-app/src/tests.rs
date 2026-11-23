@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use fakes_domain::*;
+use serde_json::Value;
 use serde_json::json;
 
 use super::*;
@@ -41,7 +42,8 @@ async fn first_start_creates_example_workspace() {
     assert_eq!(services[0].id, "ejemplo");
     assert!(services[0].running);
     let status = app.status().await.unwrap();
-    assert_eq!(status.endpoints_total, 3);
+    assert_eq!(status.endpoints_total, 5);
+    assert_eq!(status.workflows_total, 2);
     assert!(status.listeners[0].listening);
 
     let resp = http(
@@ -282,5 +284,147 @@ async fn service_with_own_port() {
     app.delete_service("s3").await.unwrap();
     let status = app.status().await.unwrap();
     assert_eq!(status.listeners.len(), 1);
+    app.shutdown().await;
+}
+
+#[test]
+fn seed_example_is_valid() {
+    let svc = seed::example_service();
+    let wf_ids: Vec<&str> = svc.workflows.iter().map(|w| w.id.as_str()).collect();
+    for (i, wf) in svc.workflows.iter().enumerate() {
+        let siblings: Vec<&Workflow> = svc.workflows[..i].iter().collect();
+        let issues = workflows::full_workflow_issues(wf, &siblings, &wf_ids);
+        assert!(issues.is_empty(), "{}: {issues:?}", wf.id);
+    }
+    for (i, ep) in svc.endpoints.iter().enumerate() {
+        let siblings: Vec<&Endpoint> = svc.endpoints[..i].iter().collect();
+        let issues = full_endpoint_issues(ep, &siblings, &wf_ids);
+        assert!(issues.is_empty(), "{}: {issues:?}", ep.id);
+    }
+}
+
+/// Criterio de éxito: simulación de MiFiel con respuesta inmediata y webhooks
+/// posteriores, configurada solo con datos (sin código).
+#[tokio::test]
+async fn mifiel_end_to_end_with_webhooks() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path()).await;
+    let svc: Service = serde_json::from_value(json!({
+        "name": "MiFiel",
+        "auth": {"type": "bearer"},
+        "workflows": [{
+            "name": "Notificar firma",
+            "steps": [
+                {"id": "espera-1", "type": "wait", "durationMs": 100},
+                {"id": "pendiente", "type": "http", "method": "POST", "url": "{{ request.body.callback_url }}",
+                 "body": {"type": "json", "content": {"id": "{{ response.body.id }}", "status": "pending"}}},
+                {"id": "espera-2", "type": "wait", "durationMs": 200},
+                {"id": "firmado", "type": "http", "method": "POST", "url": "{{ request.body.callback_url }}",
+                 "body": {"type": "json", "content": {"id": "{{ response.body.id }}", "status": "signed"}}}
+            ]
+        }],
+        "endpoints": [
+            {"method": "POST", "path": "/documents/{id}/sign",
+             "request": {"body": {"kind": "json", "required": true,
+                                  "schema": {"type": "object", "required": ["callback_url"]}}},
+             "scenarios": [{"name": "Firma exitosa",
+                            "workflows": [{"workflowId": "notificar-firma"}],
+                            "response": {"status": 201, "body": {"type": "json",
+                                "content": {"id": "doc_{{ request.params.id }}", "status": "pending"}}}}]}
+        ]
+    }))
+    .unwrap();
+    let view = app.create_service(svc).await.unwrap();
+    assert_eq!(view.service.workflows[0].id, "notificar-firma");
+
+    let addr = app.server().central_addr().await.unwrap();
+    // El receptor de webhooks del servicio de ejemplo hace de "tu aplicación".
+    let callback = format!("http://{addr}/ejemplo/webhooks");
+    let body = json!({ "callback_url": callback }).to_string();
+    let resp = http(
+        &app,
+        &format!(
+            "POST /mifiel/documents/42/sign HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer t\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ),
+    )
+    .await;
+    assert!(resp.starts_with("HTTP/1.1 201"), "{resp}");
+    let exec_id = resp
+        .lines()
+        .find_map(|l| l.strip_prefix("x-fakes-executions: "))
+        .expect("header con la ejecución")
+        .trim()
+        .to_string();
+
+    // Esperar a que termine el workflow.
+    let started = std::time::Instant::now();
+    let detail = loop {
+        let d = app.get_execution(&exec_id).await.unwrap();
+        if d.execution.status.is_finished() {
+            break d;
+        }
+        assert!(started.elapsed() < Duration::from_secs(10), "no terminó");
+        tokio::time::sleep(Duration::from_millis(30)).await;
+    };
+    assert_eq!(
+        detail.execution.status,
+        fakes_store::ExecutionStatus::Completed,
+        "{:?}",
+        detail.execution.error
+    );
+    assert_eq!(
+        detail.execution.trigger,
+        fakes_store::TriggerKind::ResponseSent
+    );
+
+    // Los webhooks llegaron al receptor (quedan en el historial).
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let hits = app
+        .list_requests(&RequestFilter {
+            search: Some("/ejemplo/webhooks".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 2);
+    let mut bodies = Vec::new();
+    for h in hits.iter().rev() {
+        let full = app.get_request(&h.id).await.unwrap();
+        bodies.push(serde_json::from_slice::<Value>(&full.request_body.bytes).unwrap());
+    }
+    assert_eq!(bodies[0], json!({"id": "doc_42", "status": "pending"}));
+    assert_eq!(bodies[1], json!({"id": "doc_42", "status": "signed"}));
+
+    // No se puede borrar un workflow en uso.
+    assert!(matches!(
+        app.delete_workflow("mifiel", "notificar-firma").await,
+        Err(AppError::Conflict(_))
+    ));
+    // Un escenario no puede apuntar a un workflow inexistente.
+    let bad: Endpoint = serde_json::from_value(json!({
+        "method": "GET", "path": "/x",
+        "scenarios": [{"name": "a", "workflows": [{"workflowId": "nope"}], "response": {"status": 200}}]
+    }))
+    .unwrap();
+    assert!(matches!(
+        app.create_endpoint("mifiel", bad).await,
+        Err(AppError::Validation(_))
+    ));
+
+    // Ejecución manual y cancelación.
+    let wf: Workflow = serde_json::from_value(
+        json!({"name": "Larga", "steps": [{"type": "wait", "durationMs": 60000}]}),
+    )
+    .unwrap();
+    app.create_workflow("mifiel", wf).await.unwrap();
+    let e = app
+        .run_workflow("mifiel", "larga", Default::default(), None)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(app.status().await.unwrap().executions_active, 1);
+    let c = app.cancel_execution(&e.id).await.unwrap();
+    assert_eq!(c.status, fakes_store::ExecutionStatus::Cancelled);
     app.shutdown().await;
 }

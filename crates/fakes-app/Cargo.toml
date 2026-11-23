@@ -12,6 +12,7 @@ fakes-matching.workspace = true
 fakes-response.workspace = true
 fakes-store.workspace = true
 fakes-server.workspace = true
+fakes-workflow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 schemars.workspace = true

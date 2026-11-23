@@ -17,6 +17,11 @@ import type {
   Workspace,
   WorkspaceInfo,
   WorkspaceView,
+  Workflow,
+  WorkflowSummary,
+  WorkflowView,
+  ExecutionSummary,
+  ExecutionDetail,
 } from './types.ts'
 
 const BASE = '/api/v1'
@@ -108,6 +113,32 @@ export const api = {
     request<EndpointView>('PUT', `/services/${enc(sid)}/endpoints/${enc(eid)}/active-scenario`, { scenarioId }),
   validateEndpoint: (sid: string, e: Partial<Endpoint>) =>
     request<ValidationReport>('POST', `/services/${enc(sid)}/endpoints/validate`, e),
+
+  // Workflows
+  workflows: (sid: string) => request<WorkflowSummary[]>('GET', `/services/${enc(sid)}/workflows`),
+  workflow: (sid: string, wid: string) =>
+    request<WorkflowView>('GET', `/services/${enc(sid)}/workflows/${enc(wid)}`),
+  createWorkflow: (sid: string, w: Partial<Workflow>) =>
+    request<WorkflowView>('POST', `/services/${enc(sid)}/workflows`, w),
+  updateWorkflow: (sid: string, wid: string, w: Workflow) =>
+    request<WorkflowView>('PUT', `/services/${enc(sid)}/workflows/${enc(wid)}`, w),
+  deleteWorkflow: (sid: string, wid: string) =>
+    request<void>('DELETE', `/services/${enc(sid)}/workflows/${enc(wid)}`),
+  validateWorkflow: (sid: string, w: Partial<Workflow>) =>
+    request<ValidationReport>('POST', `/services/${enc(sid)}/workflows/validate`, w),
+  runWorkflow: (sid: string, wid: string, input: Record<string, unknown>, context?: unknown) =>
+    request<ExecutionSummary>('POST', `/services/${enc(sid)}/workflows/${enc(wid)}/run`, { input, context }),
+
+  // Ejecuciones
+  executions: (filter: { serviceId?: string; workflowId?: string; status?: string; beforeMs?: number; limit?: number } = {}) => {
+    const q = new URLSearchParams()
+    for (const [k, v] of Object.entries(filter)) if (v !== undefined && v !== '') q.set(k, String(v))
+    const qs = q.toString()
+    return request<ExecutionSummary[]>('GET', `/executions${qs ? `?${qs}` : ''}`)
+  },
+  execution: (id: string) => request<ExecutionDetail>('GET', `/executions/${enc(id)}`),
+  cancelExecution: (id: string) => request<ExecutionSummary>('POST', `/executions/${enc(id)}/cancel`),
+  clearExecutions: () => request<{ deleted: number }>('DELETE', '/executions'),
 
   // Historial
   requests: (filter: {

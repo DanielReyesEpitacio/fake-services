@@ -16,6 +16,7 @@ const drawer = ref<boolean | null>(null)
 const nav = [
   { to: '/', title: 'nav.dashboard', icon: 'mdi-view-dashboard-outline', exact: true },
   { to: '/servicios', title: 'nav.services', icon: 'mdi-server-outline' },
+  { to: '/ejecuciones', title: 'nav.executions', icon: 'mdi-sitemap-outline' },
   { to: '/historial', title: 'nav.history', icon: 'mdi-history' },
   { to: '/espacios', title: 'nav.workspaces', icon: 'mdi-folder-outline' },
   { to: '/ajustes', title: 'nav.settings', icon: 'mdi-cog-outline' },

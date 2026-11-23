@@ -14,6 +14,7 @@ import ParamTable from '../components/ParamTable.vue'
 import ResponseEditor from '../components/ResponseEditor.vue'
 import RuleEditor from '../components/RuleEditor.vue'
 import TryRequest from '../components/TryRequest.vue'
+import WorkflowLinksEditor from '../components/WorkflowLinksEditor.vue'
 import { HTTP_METHODS, type BodyKind, type Endpoint, type Issue, type Scenario } from '@/infrastructure/api/types.ts'
 
 const props = defineProps<{ sid: string; eid: string }>()
@@ -28,6 +29,12 @@ const issues = ref<Issue[]>([])
 const tab = ref<'scenarios' | 'request' | 'general' | 'try'>('scenarios')
 const openPanels = ref<number[]>([0])
 const saving = ref(false)
+
+const workflows = ref<{ id: string; name: string }[]>([])
+api
+  .workflows(props.sid)
+  .then((list) => (workflows.value = list.map((w) => ({ id: w.id, name: w.name }))))
+  .catch(() => {})
 
 const invalidJson = reactive(new Set<symbol>())
 provide('invalidJson', invalidJson)
@@ -61,6 +68,7 @@ function normalize(e: Endpoint): Endpoint {
     s.description ??= ''
     s.response.headers ??= {}
     s.response.body ??= { type: 'none' }
+    s.workflows ??= []
   }
   return e
 }
@@ -110,6 +118,7 @@ function addScenario() {
     ruleMode: 'all',
     rules: [],
     response: { status: 400, headers: {}, body: { type: 'json', content: { error: 'bad_request' } } },
+    workflows: [],
   })
   openPanels.value = [...openPanels.value, ep.value.scenarios.length - 1]
 }
@@ -319,6 +328,9 @@ function onKey(e: KeyboardEvent) {
                     {{ s.rules?.length ? `${s.rules.length} regla${s.rules.length === 1 ? '' : 's'}` : 'por defecto' }}
                     <template v-if="s.response.delayMs"> · {{ s.response.delayMs }} ms</template>
                   </span>
+                  <VChip v-if="s.workflows?.length" size="x-small" variant="tonal" prepend-icon="mdi-sitemap-outline">
+                    {{ s.workflows.length }} workflow{{ s.workflows.length === 1 ? '' : 's' }}
+                  </VChip>
                   <VChip v-if="ep.activeScenario && ep.activeScenario === s.id" size="x-small" color="warning">forzado</VChip>
                   <VIcon v-if="scenarioIssues(i).length" icon="mdi-alert-circle-outline" color="error" size="small" />
                   <VSpacer />
@@ -345,6 +357,10 @@ function onKey(e: KeyboardEvent) {
                   </VCol>
                   <VCol cols="12" xl="6">
                     <ResponseEditor v-model="s.response" />
+                  </VCol>
+                  <VCol cols="12">
+                    <div class="text-label-medium text-medium-emphasis mb-2">Workflows que inicia</div>
+                    <WorkflowLinksEditor v-model="s.workflows!" :sid="sid" :workflows="workflows" />
                   </VCol>
                 </VRow>
               </VExpansionPanelText>

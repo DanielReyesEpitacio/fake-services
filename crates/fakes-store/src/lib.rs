@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize, Serializer};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
+mod executions;
+pub use executions::*;
+
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
     #[error("base de datos: {0}")]

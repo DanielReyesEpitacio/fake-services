@@ -125,6 +125,27 @@ pub fn router() -> Router<AppState> {
             "/services/{sid}/endpoints/{eid}/active-scenario",
             put(set_active_scenario),
         )
+        // Workflows
+        .route(
+            "/services/{sid}/workflows",
+            get(list_workflows).post(create_workflow),
+        )
+        .route(
+            "/services/{sid}/workflows/validate",
+            post(validate_workflow),
+        )
+        .route(
+            "/services/{sid}/workflows/{wid}",
+            get(get_workflow)
+                .put(update_workflow)
+                .patch(patch_workflow)
+                .delete(delete_workflow),
+        )
+        .route("/services/{sid}/workflows/{wid}/run", post(run_workflow))
+        // Ejecuciones
+        .route("/executions", get(list_executions).delete(clear_executions))
+        .route("/executions/{id}", get(get_execution))
+        .route("/executions/{id}/cancel", post(cancel_execution))
         // Historial
         .route("/requests", get(list_requests).delete(clear_requests))
         .route("/requests/{id}", get(get_request))
@@ -158,9 +179,10 @@ async fn schema(Path(name): Path<String>) -> Result<Json<Value>, ApiError> {
         "workspace" => schemars::schema_for!(Workspace),
         "service" => schemars::schema_for!(Service),
         "endpoint" => schemars::schema_for!(Endpoint),
+        "workflow" => schemars::schema_for!(fakes_domain::Workflow),
         _ => {
             return Err(ApiError(AppError::NotFound(format!(
-                "esquema '{name}' desconocido; opciones: workspace, service, endpoint"
+                "esquema '{name}' desconocido; opciones: workspace, service, endpoint, workflow"
             ))));
         }
     };
@@ -427,5 +449,116 @@ async fn clear_requests(
     Query(q): Query<ClearQuery>,
 ) -> ApiResult<Value> {
     let deleted = app.clear_requests(q.service_id.as_deref()).await?;
+    Ok(Json(json!({ "deleted": deleted })))
+}
+
+// -- workflows ------------------------------------------------------------
+
+async fn list_workflows(
+    State(app): State<AppState>,
+    Path(sid): Path<String>,
+) -> ApiResult<Vec<fakes_app::WorkflowSummary>> {
+    Ok(Json(app.list_workflows(&sid).await?))
+}
+
+async fn create_workflow(
+    State(app): State<AppState>,
+    Path(sid): Path<String>,
+    payload: Result<Json<Value>, JsonRejection>,
+) -> Result<(StatusCode, Json<fakes_app::WorkflowView>), ApiError> {
+    let v = app.create_workflow(&sid, body(payload)?).await?;
+    Ok((StatusCode::CREATED, Json(v)))
+}
+
+async fn validate_workflow(
+    State(app): State<AppState>,
+    Path(sid): Path<String>,
+    payload: Result<Json<Value>, JsonRejection>,
+) -> ApiResult<fakes_app::ValidationReport> {
+    Ok(Json(app.validate_workflow(&sid, body(payload)?).await?))
+}
+
+async fn get_workflow(
+    State(app): State<AppState>,
+    Path((sid, wid)): Path<(String, String)>,
+) -> ApiResult<fakes_app::WorkflowView> {
+    Ok(Json(app.get_workflow(&sid, &wid).await?))
+}
+
+async fn update_workflow(
+    State(app): State<AppState>,
+    Path((sid, wid)): Path<(String, String)>,
+    payload: Result<Json<Value>, JsonRejection>,
+) -> ApiResult<fakes_app::WorkflowView> {
+    Ok(Json(app.update_workflow(&sid, &wid, body(payload)?).await?))
+}
+
+async fn patch_workflow(
+    State(app): State<AppState>,
+    Path((sid, wid)): Path<(String, String)>,
+    payload: Result<Json<Value>, JsonRejection>,
+) -> ApiResult<fakes_app::WorkflowView> {
+    Ok(Json(app.patch_workflow(&sid, &wid, raw(payload)?).await?))
+}
+
+async fn delete_workflow(
+    State(app): State<AppState>,
+    Path((sid, wid)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    app.delete_workflow(&sid, &wid).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct RunBody {
+    /// Entrada del workflow (`{{ input.X }}`).
+    #[serde(default)]
+    input: std::collections::BTreeMap<String, Value>,
+    /// Contexto simulado opcional: `{"request": {...}, "response": {...}}`.
+    #[serde(default)]
+    context: Option<Value>,
+}
+
+async fn run_workflow(
+    State(app): State<AppState>,
+    Path((sid, wid)): Path<(String, String)>,
+    payload: Option<Json<Value>>,
+) -> Result<(StatusCode, Json<fakes_store::ExecutionSummary>), ApiError> {
+    let b: RunBody = match payload {
+        Some(Json(v)) if !v.is_null() => {
+            serde_json::from_value(v).map_err(|e| bad_request(format!("datos inválidos: {e}")))?
+        }
+        _ => RunBody::default(),
+    };
+    let s = app.run_workflow(&sid, &wid, b.input, b.context).await?;
+    Ok((StatusCode::ACCEPTED, Json(s)))
+}
+
+// -- ejecuciones ------------------------------------------------------------
+
+async fn list_executions(
+    State(app): State<AppState>,
+    Query(filter): Query<fakes_store::ExecutionFilter>,
+) -> ApiResult<Vec<fakes_store::ExecutionSummary>> {
+    Ok(Json(app.list_executions(&filter).await?))
+}
+
+async fn get_execution(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<fakes_app::ExecutionDetail> {
+    Ok(Json(app.get_execution(&id).await?))
+}
+
+async fn cancel_execution(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<fakes_store::ExecutionSummary> {
+    Ok(Json(app.cancel_execution(&id).await?))
+}
+
+async fn clear_executions(State(app): State<AppState>) -> ApiResult<Value> {
+    let deleted = app.clear_executions().await?;
     Ok(Json(json!({ "deleted": deleted })))
 }

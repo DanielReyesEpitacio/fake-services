@@ -7,4 +7,7 @@ export const RouteNames = {
   workspaces: 'workspaces',
   settings: 'settings',
   appearance: 'appearance',
+  workflow: 'workflow',
+  executions: 'executions',
+  execution: 'execution',
 } as const

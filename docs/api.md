@@ -40,8 +40,8 @@ rebinding).
 |---|---|---|
 | GET | `/status` | Versión, espacio activo, URLs, puertos, contadores y problemas de carga. |
 | POST | `/reload` | Relee el espacio activo desde disco. |
-| GET | `/events` | Eventos en vivo (SSE): `request`, `config_changed`, `runtime_changed`. |
-| GET | `/schemas/{workspace\|service\|endpoint}` | JSON Schema de cada documento. |
+| GET | `/events` | Eventos en vivo (SSE): `request`, `config_changed`, `runtime_changed`, `execution`, `workflow_event`. |
+| GET | `/schemas/{workspace\|service\|endpoint\|workflow}` | JSON Schema de cada documento. |
 
 ### Espacios de trabajo
 
@@ -74,6 +74,28 @@ rebinding).
 | GET / PUT / PATCH / DELETE | `/services/{sid}/endpoints/{eid}` | — |
 | POST | `/services/{sid}/endpoints/{eid}/enable`, `.../disable` | — |
 | PUT | `/services/{sid}/endpoints/{eid}/active-scenario` | `{ "scenarioId": "rechazada" \| null }` |
+
+### Workflows
+
+| Método | Ruta | Body |
+|---|---|---|
+| GET | `/services/{sid}/workflows` | — |
+| POST | `/services/{sid}/workflows` | `Workflow` (`id` y los `id` de pasos se generan si faltan). |
+| POST | `/services/{sid}/workflows/validate` | `Workflow`: valida sin guardar. |
+| GET / PUT / PATCH / DELETE | `/services/{sid}/workflows/{wid}` | `DELETE` responde 409 si un escenario u otro workflow lo usa. |
+| POST | `/services/{sid}/workflows/{wid}/run` | `{ "input": {...}, "context": {"request": {...}, "response": {...}} }` → 202 con la ejecución. |
+
+### Ejecuciones
+
+| Método | Ruta | Parámetros |
+|---|---|---|
+| GET | `/executions` | `serviceId`, `workflowId`, `status` (p. ej. `running,waiting`), `beforeMs`, `limit` |
+| GET | `/executions/{id}` | Estado completo, contexto y línea de tiempo. |
+| POST | `/executions/{id}/cancel` | — |
+| DELETE | `/executions` | Borra las terminadas. |
+
+Los eventos en vivo (`/events`) incluyen `execution` (cambio de estado) y `workflow_event`
+(pasos `emit`).
 
 ### Historial
 

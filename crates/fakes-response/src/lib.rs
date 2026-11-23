@@ -378,3 +378,17 @@ pub fn validate_templates(base: &str, def: &ResponseDef) -> Vec<Issue> {
 
 #[cfg(test)]
 mod tests;
+
+/// Valida la sintaxis de una plantilla de texto.
+pub fn validate_template_text(field: &str, src: &str) -> Vec<Issue> {
+    let mut issues = Vec::new();
+    check_syntax(&mut issues, field, src);
+    issues
+}
+
+/// Valida la sintaxis de todas las plantillas dentro de un valor JSON.
+pub fn validate_template_json(field: &str, v: &Value) -> Vec<Issue> {
+    let mut issues = Vec::new();
+    check_json(&mut issues, field, v);
+    issues
+}

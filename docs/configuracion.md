@@ -14,6 +14,8 @@ mi-proyecto/.fakes/
       service.json
       endpoints/
         post-documents-id-sign.json
+      workflows/
+        notificar-firma.json
 ```
 
 Los archivos usan JSON con indentación de 2 espacios y orden estable, así los diffs en Git son
@@ -159,6 +161,106 @@ Operadores: `equals`, `notEquals`, `contains`, `notContains`, `exists`, `notExis
 | `binary` | `base64`, `contentType`. |
 | `file` | `path` relativo a `files/` (admite plantillas), `contentType` opcional. |
 | `none` | Sin body. |
+
+## Workflows
+
+Un workflow pertenece a un servicio y se guarda en `services/<servicio>/workflows/<id>.json`.
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "notificar-firma",
+  "name": "Notificar firma",
+  "enabled": true,
+  "variables": { "intentos": 0 },
+  "steps": [
+    { "id": "espera", "type": "wait", "durationMs": 5000 },
+    {
+      "id": "pendiente", "type": "http", "method": "POST",
+      "url": "{{ request.body.callback_url }}",
+      "headers": { "X-Signature": "{{ vars.SECRET }}" },
+      "body": { "type": "json", "content": { "id": "{{ response.body.id }}", "status": "pending" } },
+      "timeoutMs": 10000,
+      "retry": { "maxAttempts": 3, "backoffMs": 1000, "multiplier": 2 },
+      "expectedStatus": ["2xx"]
+    },
+    { "id": "espera-firma", "type": "wait", "durationMs": 15000 },
+    {
+      "id": "decidir", "type": "condition",
+      "conditions": [{ "path": "request.body.firmante", "operator": "contains", "value": "rechazo" }],
+      "onTrue": "rechazar", "onFalse": "firmar"
+    },
+    { "id": "firmar", "type": "http", "method": "POST", "url": "{{ request.body.callback_url }}",
+      "body": { "type": "json", "content": { "status": "signed" } }, "next": "end" },
+    { "id": "rechazar", "type": "http", "method": "POST", "url": "{{ request.body.callback_url }}",
+      "body": { "type": "json", "content": { "status": "rejected" } } }
+  ],
+  "maxSteps": 500
+}
+```
+
+### Tipos de paso
+
+| `type` | Campos | Qué hace |
+|---|---|---|
+| `wait` | `durationMs` | Espera (máx. 24 h). Sobrevive a reinicios. |
+| `http` | `method`, `url`, `headers`, `query`, `body` (`json`, `text`, `form`), `timeoutMs`, `delayMs`, `retry`, `expectedStatus`, `continueOnError` | Solicitud HTTP. Su resultado queda en `steps.<id>.response`. |
+| `emit` | `event`, `data` | Evento en la línea de tiempo y en los eventos en vivo. |
+| `setVariables` | `values` | Asigna `vars.*`. |
+| `condition` | `conditions[]` (`path`, `operator`, `value`), `mode`, `onTrue`, `onFalse` | Salta según el resultado. |
+| `runWorkflow` | `workflowId`, `input`, `wait` | Inicia otro workflow del servicio (máx. 5 niveles). |
+| `fail` | `message` | Termina la ejecución como fallida. |
+| `end` | — | Termina la ejecución como completada. |
+
+Cualquier paso acepta `next` para saltar a otro paso (`end` termina). Los bucles están permitidos
+y se cortan con `maxSteps`.
+
+Los `expectedStatus` aceptan `200`, `2xx` o `200-299`; vacío equivale a `2xx`. Los errores de red y
+los códigos inesperados se reintentan con espera exponencial; un destino bloqueado por la
+política de seguridad no se reintenta.
+
+### Iniciar un workflow desde un escenario
+
+```json
+"scenarios": [{
+  "name": "Firma exitosa",
+  "response": { "status": 201, "body": { "type": "json", "content": { "id": "doc_{{ uuid() }}" } } },
+  "workflows": [{
+    "workflowId": "notificar-firma",
+    "when": "responseSent",
+    "input": { "documento": "{{ request.params.id }}" }
+  }]
+}]
+```
+
+`when` puede ser `responseSent` (por defecto, el workflow recibe también `response.*`) o
+`requestReceived`. La respuesta incluye el header `x-fakes-executions` con los ids creados.
+
+### Contexto de una ejecución
+
+| Variable | Contenido |
+|---|---|
+| `request.*` | Solicitud original (igual que en las respuestas). |
+| `response.*` | Respuesta enviada: `status`, `headers`, `body`. |
+| `input.*` | Entrada del vínculo, de la ejecución manual o del workflow padre. |
+| `vars.*` | Variables del espacio, del servicio, del workflow y las asignadas en pasos. |
+| `steps.<id>.*` | Resultado de cada paso (`response.status`, `response.body`, `attempts`, `error`...). |
+| `execution.*` | `id`, `trigger`, `startedAt`, `status`. |
+| `service.*`, `workflow.*` | Datos del servicio y del workflow. |
+
+Las condiciones usan rutas con puntos sobre este mismo contexto (`steps.pendiente.response.status`).
+
+### Política de webhooks (SSRF)
+
+En `fakes.workspace.json`:
+
+```json
+"webhooks": { "allowLoopback": true, "allowPrivateNetworks": false, "allowedHosts": ["host.docker.internal"] }
+```
+
+La IP se verifica **después** de resolver el nombre (también contra DNS rebinding). Las direcciones
+de metadatos de nube, link-local, multicast y no especificadas se bloquean siempre. No se siguen
+redirecciones ni se usan proxies del entorno.
 
 ## Plantillas
 

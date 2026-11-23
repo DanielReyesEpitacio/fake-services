@@ -9,7 +9,7 @@
 | Interfaz | Vue 3, TypeScript, Vite, Vuetify 4, CodeMirror 6 | Componentes maduros y temas nativos. Los *look and feels* (Cupertino Glass por defecto, Fluent, JetBrains, Atlas…) vienen del módulo de temas de la plataforma (`ui/src/platform/adapters/vue/themes`). La UI se compila y se embebe en el binario (`rust-embed`): funciona sin Internet. |
 | Plantillas | MiniJinja | Sintaxis `{{ }}` conocida, sandbox, límite de ejecución (fuel) y sin acceso a E/S. |
 | Validación | `jsonschema` | JSON Schema completo para validar bodies. |
-| Persistencia | Archivos JSON + SQLite (`sqlx`, incluido en el binario) | JSON para la configuración (Git); SQLite en modo WAL para el historial y, en la fase 2, las ejecuciones y timers durables. |
+| Persistencia | Archivos JSON + SQLite (`sqlx`, incluido en el binario) | JSON para la configuración (Git); SQLite en modo WAL para el historial y las ejecuciones de workflows (estado durable y línea de tiempo). |
 
 Alternativas descartadas: Electron (más de 200 MB de RAM y sin modo sin interfaz natural), Go +
 Wails (su empaquetado AppImage/DEB está menos maduro) y Docker (es requisito no depender de él).
@@ -23,7 +23,7 @@ crates/
   fakes-server    3. Servidor HTTP: servidor central + puertos propios, CORS, historial.
   fakes-matching  4. Motor de coincidencia: rutas, autenticación, validación, escenarios.
   fakes-response  5. Motor de respuestas: plantillas y construcción de respuestas.
-  (fase 2)        6. Motor de workflows.
+  fakes-workflow  6. Motor de workflows: ejecuciones durables, webhooks con protección SSRF.
   fakes-store     7. Persistencia de ejecución: SQLite (historial, clave-valor).
   fakes-api       8. API REST + entrega de la interfaz web.
   (fase 3)        9. Servidor MCP (usará fakes-app igual que la API REST).
@@ -40,7 +40,8 @@ domain ← config
 domain ← matching ← server
 domain ← response ← server
 store  ← server
-config, matching, response, store, server ← app ← api ← cli / desktop
+domain, matching, response, store ← workflow
+config, matching, response, store, server, workflow ← app ← api ← cli / desktop
 ```
 
 `fakes-domain` no depende de nada del sistema (ni HTTP, ni disco, ni plantillas).
@@ -81,15 +82,28 @@ descarta el registro con una advertencia.
 - Las expresiones regulares (crate `regex`) se evalúan en tiempo lineal: no hay ReDoS.
 - Los headers sensibles se ocultan parcialmente en el historial (`Bearer abcd••••`).
 - Límite de tamaño de body (10 MB por defecto) y retraso máximo de 5 minutos.
-- Fase 2: protección SSRF en webhooks verificando la IP *resuelta* (bloqueo de metadatos
-  `169.254.169.254`, link-local y redes privadas configurables), límites de pasos por ejecución
-  y de profundidad de sub-workflows.
+- Webhooks con protección SSRF: se verifica la IP *resuelta* (también en el resolvedor DNS del
+  cliente, contra DNS rebinding); metadatos de nube, link-local y multicast bloqueados siempre;
+  loopback y redes privadas configurables; sin redirecciones ni proxies del entorno.
+- Límites del motor: pasos por ejecución (contra bucles infinitos), 5 niveles de workflows
+  anidados, 256 ejecuciones simultáneas, esperas de hasta 24 h, tiempo límite HTTP de 120 s y
+  hasta 10 reintentos.
+
+## Motor de workflows
+
+- Cada ejecución corre en su propia tarea con un contexto JSON aislado.
+- Tras cada transición se guarda en SQLite el estado completo: paso actual, fase, intento,
+  `wake_at` de las esperas y el contexto. La definición del workflow se copia al iniciar, así que
+  editarlo no afecta ejecuciones en curso.
+- Al arrancar (o al volver a un espacio), las ejecuciones sin terminar se retoman; las esperas
+  respetan la hora original. Un paso que quedó a la mitad se repite (al menos una vez).
+- Las esperas cancelables usan `tokio::select!`; la cancelación del usuario marca la ejecución
+  como cancelada, mientras que un apagado la deja pendiente para retomarla.
+- El servidor de simulación no depende del motor: recibe un `WorkflowStarter` (inversión de
+  dependencias) que la capa de aplicación conecta con `fakes-workflow`.
 
 ## Preparado para las siguientes fases
 
-- **Workflows** (fase 2): `fakes-matching::eval_operator` ya es reutilizable para condiciones;
-  `IncomingRequest` está en el dominio para usarse como contexto de ejecución; SQLite alojará
-  ejecuciones, línea de tiempo y timers durables para retomar tras reiniciar.
 - **MCP** (fase 3): los tipos del dominio y las vistas derivan `JsonSchema`, de modo que los
   esquemas de entrada y salida de cada herramienta se generan de los mismos tipos que usa REST.
 - **Recursos simulados persistentes** (fase 4): colecciones genéricas en SQLite por espacio.

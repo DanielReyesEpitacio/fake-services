@@ -212,3 +212,70 @@ fn token_is_created_once_with_private_permissions() {
         assert_eq!(mode & 0o777, 0o600);
     }
 }
+
+#[tokio::test]
+async fn workflows_and_executions_through_rest() {
+    let (router, app, _tmp) = setup().await;
+
+    let (s, v) = send(&router, "GET", "/api/v1/services/ejemplo/workflows", None).await;
+    assert_eq!(s, 200);
+    assert_eq!(v.as_array().unwrap().len(), 2);
+
+    let (s, v) = send(
+        &router,
+        "POST",
+        "/api/v1/services/ejemplo/workflows",
+        Some(json!({"name": "Rápido", "steps": [{"type": "setVariables", "values": {"x": "{{ input.n }}"}}]})),
+    )
+    .await;
+    assert_eq!(s, 201, "{v}");
+    assert_eq!(v["workflow"]["steps"][0]["id"], "setvariables");
+
+    let (s, v) = send(
+        &router,
+        "POST",
+        "/api/v1/services/ejemplo/workflows/validate",
+        Some(json!({"name": "Mal", "steps": [{"id": "a", "type": "http", "method": "POST", "url": ""}]})),
+    )
+    .await;
+    assert_eq!(s, 200);
+    assert_eq!(v["valid"], false);
+
+    let (s, v) = send(
+        &router,
+        "POST",
+        "/api/v1/services/ejemplo/workflows/rapido/run",
+        Some(json!({"input": {"n": 7}})),
+    )
+    .await;
+    assert_eq!(s, 202, "{v}");
+    let id = v["id"].as_str().unwrap().to_string();
+
+    let mut detail = Value::Null;
+    for _ in 0..100 {
+        let (_, d) = send(&router, "GET", &format!("/api/v1/executions/{id}"), None).await;
+        if d["execution"]["status"] == "completed" {
+            detail = d;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(detail["execution"]["context"]["vars"]["x"], 7, "{detail}");
+    assert!(detail["timeline"].as_array().unwrap().len() >= 3);
+
+    let (s, v) = send(&router, "GET", "/api/v1/executions?status=completed", None).await;
+    assert_eq!(s, 200);
+    assert_eq!(v.as_array().unwrap().len(), 1);
+
+    let (s, _) = send(
+        &router,
+        "DELETE",
+        "/api/v1/services/ejemplo/workflows/notificar-firma",
+        None,
+    )
+    .await;
+    assert_eq!(s, 409);
+    let (s, _) = send(&router, "GET", "/api/v1/schemas/workflow", None).await;
+    assert_eq!(s, 200);
+    app.shutdown().await;
+}

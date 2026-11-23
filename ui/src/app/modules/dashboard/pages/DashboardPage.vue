@@ -26,7 +26,13 @@ const metrics = computed(() => [
   },
   { label: 'Endpoints', value: store.status?.endpointsTotal ?? 0, icon: 'mdi-routes' },
   { label: 'Solicitudes registradas', value: store.status?.requestsTotal ?? 0, icon: 'mdi-swap-horizontal' },
-  { label: 'Workflows en ejecución', value: '—', icon: 'mdi-sitemap-outline', hint: 'Disponible en la fase 2' },
+  {
+    label: 'Workflows en ejecución',
+    value: store.status?.executionsActive ?? 0,
+    icon: 'mdi-sitemap-outline',
+    hint: `${store.status?.workflowsTotal ?? 0} workflows configurados`,
+    to: '/ejecuciones',
+  },
 ])
 </script>
 
@@ -56,7 +62,7 @@ const metrics = computed(() => [
 
     <VRow class="mb-2">
       <VCol v-for="m in metrics" :key="m.label" cols="12" sm="6" lg="3">
-        <VCard>
+        <VCard :to="'to' in m ? m.to : undefined">
           <VCardText class="d-flex align-center gap-3">
             <VAvatar color="primary" :icon="m.icon" />
             <div>

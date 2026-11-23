@@ -7,7 +7,7 @@
 
 Fake Services es un simulador de servicios externos **open source, gratuito y autoalojable**.
 Te permite simular localmente las APIs de terceros que usa tu aplicación (MiFiel, Belvo,
-COPOMEX, Stripe, AWS S3…) con endpoints, escenarios de error, retrasos y, pronto, workflows
+COPOMEX, Stripe, AWS S3…) con endpoints, escenarios de error, retrasos y workflows
 asíncronos con webhooks.
 
 Está pensado **para agentes de IA primero**: todo lo que se puede hacer desde la interfaz se
@@ -23,9 +23,27 @@ escribir código.
 | Fase | Contenido | Estado |
 |---|---|---|
 | 1 | Espacios de trabajo, servicios, servidor central, endpoints, matching, respuestas dinámicas, historial, interfaz | ✅ Implementada |
-| 2 | Motor de workflows: retrasos, condiciones, webhooks, reintentos, ejecuciones | Pendiente |
+| 2 | Motor de workflows: esperas, condiciones, webhooks con URLs dinámicas, reintentos, ejecuciones durables con línea de tiempo | ✅ Implementada |
 | 3 | Servidor MCP, importación OpenAPI/Postman, exportación | Pendiente (la API REST ya existe) |
 | 4 | Editor visual de workflows, plantillas de proveedores, recursos persistentes | Pendiente |
+
+## Instalar
+
+Un solo comando compila e instala (requiere Rust, Node.js 20+ y pnpm):
+
+| Sistema | Todo (CLI + app de escritorio) | Solo el CLI `fakes` |
+|---|---|---|
+| Linux | `./scripts/install.sh` | `./scripts/install.sh --solo-cli` |
+| Windows (PowerShell) | `.\scripts\install.ps1` | `.\scripts\install.ps1 -SoloCli` |
+
+- En Linux, si faltan WebKitGTK o libsoup, el script muestra el comando para instalarlas
+  (apt, dnf o pacman) y pregunta antes de usar `sudo`. Usa `-y` para no preguntar.
+- La app de escritorio se instala como paquete DEB/RPM o, en otras distribuciones, como
+  AppImage en tu carpeta personal con acceso en el menú de aplicaciones. En Windows se usa su
+  instalador NSIS, solo para tu usuario.
+- Para desinstalar: `./scripts/install.sh --desinstalar` o `.\scripts\install.ps1 -Desinstalar`.
+- Para solo compilar (sin instalar): `./scripts/build.sh` o `.\scripts\build.ps1`. Los
+  instaladores quedan en `target/release/bundle/`.
 
 ## Inicio rápido
 
@@ -49,6 +67,17 @@ Abre `http://127.0.0.1:4010` para usar la interfaz web y prueba el servicio de e
 curl http://127.0.0.1:4000/ejemplo/usuarios/42
 curl -X POST http://127.0.0.1:4000/ejemplo/pagos -H 'content-type: application/json' -d '{"monto": 50000}'
 ```
+
+Y un flujo asíncrono tipo MiFiel: responde `201` al instante y después envía dos webhooks
+(«pendiente» a los 5 s y «firmado» a los 15 s) al `callback_url`:
+
+```bash
+curl -i -X POST http://127.0.0.1:4000/ejemplo/documentos/contrato-1/firmar \
+  -H 'content-type: application/json' \
+  -d '{"callback_url": "http://127.0.0.1:4000/ejemplo/webhooks", "firmante": "ana@example.com"}'
+```
+
+El header `x-fakes-executions` trae el id de la ejecución; síguela en *Ejecuciones*.
 
 ### Aplicación de escritorio
 
@@ -74,7 +103,14 @@ Esto genera instaladores NSIS/MSI (Windows) y AppImage/DEB/RPM (Linux).
 - **Endpoint**: método + ruta (`POST /documents/{id}/sign`), lo que espera recibir (headers,
   query, body con JSON Schema) y una lista ordenada de **escenarios**.
 - **Escenario**: reglas de coincidencia y la respuesta a devolver. Gana el primero cuyas reglas se
-  cumplan. Puedes forzar uno desde la interfaz o con el header `x-fakes-scenario`.
+  cumplan. Puedes forzar uno desde la interfaz o con el header `x-fakes-scenario`. Un escenario
+  puede iniciar **workflows**.
+- **Workflow**: pasos asíncronos sin código: esperar, solicitud HTTP (webhook) con reintentos,
+  condiciones con saltos, variables, emitir eventos, ejecutar otro workflow, simular un error o
+  finalizar. Se inicia al recibir la solicitud, al completar la respuesta, manualmente o cada
+  cierto tiempo.
+- **Ejecución**: cada corrida de un workflow, con contexto aislado y línea de tiempo. Se guarda en
+  SQLite tras cada paso: si cierras la app, al volver a abrirla continúa donde quedó.
 
 ## Plantillas en respuestas
 

@@ -408,6 +408,7 @@ mod tests {
                 description: String::new(),
                 enabled: true,
                 rule_mode: RuleMode::All,
+                workflows: vec![],
                 rules: vec![],
                 response: ResponseDef::json(200, json!({})),
             }],
@@ -467,6 +468,7 @@ mod tests {
             auto_start: true,
             variables: Default::default(),
             auth: AuthConfig::None,
+            workflows: vec![],
             endpoints: vec![],
         };
         let a = mk("a", "/mifiel");
@@ -474,5 +476,299 @@ mod tests {
         assert!(!validate_service(&b, &[&a], &ws).is_empty());
         let c = mk("c", "mifiel/");
         assert!(!validate_service(&c, &[], &ws).is_empty());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Workflows
+// ---------------------------------------------------------------------------
+
+/// Valida un workflow contra los demás del mismo servicio.
+pub fn validate_workflow(
+    wf: &crate::workflow::Workflow,
+    siblings: &[&crate::workflow::Workflow],
+) -> Vec<Issue> {
+    use crate::workflow::{Action, JUMP_END, JUMP_NEXT, StepBody, limits, valid_status_pattern};
+
+    let mut issues = Vec::new();
+    check_id(&mut issues, "id", &wf.id);
+    if wf.name.trim().is_empty() {
+        issues.push(Issue::new("name", "el nombre es obligatorio"));
+    }
+    if siblings.iter().any(|o| o.id == wf.id) {
+        issues.push(Issue::new(
+            "id",
+            format!("ya existe el workflow '{}'", wf.id),
+        ));
+    }
+    if wf.max_steps == 0 || wf.max_steps > limits::MAX_STEPS {
+        issues.push(Issue::new(
+            "maxSteps",
+            format!("debe estar entre 1 y {}", limits::MAX_STEPS),
+        ));
+    }
+    if let Some(s) = &wf.schedule
+        && s.every_ms < limits::MIN_SCHEDULE_MS
+    {
+        issues.push(Issue::new(
+            "schedule.everyMs",
+            "el intervalo mínimo es 1000 ms",
+        ));
+    }
+    for name in wf.variables.keys() {
+        if !valid_var_name(name) {
+            issues.push(Issue::new(
+                format!("variables.{name}"),
+                "nombre de variable inválido: letras, números y '_'",
+            ));
+        }
+    }
+
+    let ids: Vec<&str> = wf.steps.iter().map(|s| s.id.as_str()).collect();
+    let check_jump = |issues: &mut Vec<Issue>, field: String, target: &Option<String>| {
+        if let Some(t) = target
+            && t != JUMP_END
+            && t != JUMP_NEXT
+            && !ids.contains(&t.as_str())
+        {
+            issues.push(Issue::new(field, format!("no existe el paso '{t}'")));
+        }
+    };
+
+    let mut seen = HashSet::new();
+    for (i, step) in wf.steps.iter().enumerate() {
+        let base = format!("steps[{i}]");
+        check_id(&mut issues, &format!("{base}.id"), &step.id);
+        if step.id == JUMP_END || step.id == JUMP_NEXT {
+            issues.push(Issue::new(
+                format!("{base}.id"),
+                "'end' y 'next' están reservados",
+            ));
+        }
+        if !seen.insert(step.id.as_str()) {
+            issues.push(Issue::new(
+                format!("{base}.id"),
+                "identificador de paso repetido",
+            ));
+        }
+        check_jump(&mut issues, format!("{base}.next"), &step.next);
+
+        match &step.action {
+            Action::Wait { duration_ms } => {
+                if *duration_ms > limits::MAX_WAIT_MS {
+                    issues.push(Issue::new(
+                        format!("{base}.durationMs"),
+                        "la espera máxima es de 24 horas",
+                    ));
+                }
+            }
+            Action::Http(h) => {
+                if h.url.trim().is_empty() {
+                    issues.push(Issue::new(format!("{base}.url"), "la URL es obligatoria"));
+                } else if !h.url.contains("{{")
+                    && !(h.url.starts_with("http://") || h.url.starts_with("https://"))
+                {
+                    issues.push(Issue::new(
+                        format!("{base}.url"),
+                        "la URL debe comenzar con http:// o https://",
+                    ));
+                }
+                if h.method == crate::HttpMethod::Any {
+                    issues.push(Issue::new(
+                        format!("{base}.method"),
+                        "elige un método concreto",
+                    ));
+                }
+                if h.timeout_ms == 0 || h.timeout_ms > limits::MAX_HTTP_TIMEOUT_MS {
+                    issues.push(Issue::new(
+                        format!("{base}.timeoutMs"),
+                        "el tiempo límite debe estar entre 1 y 120000 ms",
+                    ));
+                }
+                if h.delay_ms > limits::MAX_WAIT_MS {
+                    issues.push(Issue::new(
+                        format!("{base}.delayMs"),
+                        "el retraso máximo es de 24 horas",
+                    ));
+                }
+                if h.retry.max_attempts > limits::MAX_RETRIES {
+                    issues.push(Issue::new(
+                        format!("{base}.retry.maxAttempts"),
+                        format!("máximo {} reintentos", limits::MAX_RETRIES),
+                    ));
+                }
+                if !(1.0..=10.0).contains(&h.retry.multiplier) {
+                    issues.push(Issue::new(
+                        format!("{base}.retry.multiplier"),
+                        "el multiplicador debe estar entre 1 y 10",
+                    ));
+                }
+                for (j, p) in h.expected_status.iter().enumerate() {
+                    if !valid_status_pattern(p) {
+                        issues.push(Issue::new(
+                            format!("{base}.expectedStatus[{j}]"),
+                            "usa un código (200), una familia (2xx) o un rango (200-299)",
+                        ));
+                    }
+                }
+                for name in h.headers.keys() {
+                    if http_header_name_invalid(name) {
+                        issues.push(Issue::new(
+                            format!("{base}.headers.{name}"),
+                            "nombre de header inválido",
+                        ));
+                    }
+                }
+                if let StepBody::Form { fields } = &h.body
+                    && fields.keys().any(|k| k.trim().is_empty())
+                {
+                    issues.push(Issue::new(
+                        format!("{base}.body.fields"),
+                        "hay un campo sin nombre",
+                    ));
+                }
+            }
+            Action::Emit { event, .. } => {
+                if event.trim().is_empty() {
+                    issues.push(Issue::new(
+                        format!("{base}.event"),
+                        "el nombre del evento es obligatorio",
+                    ));
+                }
+            }
+            Action::SetVariables { values } => {
+                if values.is_empty() {
+                    issues.push(Issue::new(
+                        format!("{base}.values"),
+                        "agrega al menos una variable",
+                    ));
+                }
+                for name in values.keys() {
+                    if !valid_var_name(name) {
+                        issues.push(Issue::new(
+                            format!("{base}.values.{name}"),
+                            "nombre de variable inválido: letras, números y '_'",
+                        ));
+                    }
+                }
+            }
+            Action::Condition {
+                conditions,
+                on_true,
+                on_false,
+                ..
+            } => {
+                if conditions.is_empty() {
+                    issues.push(Issue::new(
+                        format!("{base}.conditions"),
+                        "agrega al menos una condición",
+                    ));
+                }
+                for (j, c) in conditions.iter().enumerate() {
+                    if c.path.trim().is_empty() {
+                        issues.push(Issue::new(
+                            format!("{base}.conditions[{j}].path"),
+                            "indica el dato a evaluar (p. ej. request.body.monto)",
+                        ));
+                    }
+                    let rule = Rule {
+                        source: RuleSource::Variable,
+                        key: c.path.clone(),
+                        operator: c.operator,
+                        value: c.value.clone(),
+                    };
+                    let mut sub = Vec::new();
+                    validate_rule(&mut sub, &format!("{base}.conditions[{j}]"), &rule);
+                    issues.extend(sub.into_iter().filter(|x| !x.field.ends_with(".key")));
+                }
+                check_jump(&mut issues, format!("{base}.onTrue"), on_true);
+                check_jump(&mut issues, format!("{base}.onFalse"), on_false);
+            }
+            Action::RunWorkflow { workflow_id, .. } => {
+                if workflow_id.trim().is_empty() {
+                    issues.push(Issue::new(
+                        format!("{base}.workflowId"),
+                        "elige el workflow a ejecutar",
+                    ));
+                } else if *workflow_id == wf.id {
+                    issues.push(Issue::new(
+                        format!("{base}.workflowId"),
+                        "un workflow no puede ejecutarse a sí mismo; usa un salto",
+                    ));
+                }
+            }
+            Action::Fail { message } => {
+                if message.trim().is_empty() {
+                    issues.push(Issue::new(
+                        format!("{base}.message"),
+                        "describe el error simulado",
+                    ));
+                }
+            }
+            Action::End => {}
+        }
+    }
+    issues
+}
+
+#[cfg(test)]
+mod workflow_tests {
+    use super::*;
+    use crate::workflow::Workflow;
+    use serde_json::json;
+
+    fn wf(v: serde_json::Value) -> Workflow {
+        serde_json::from_value(v).unwrap()
+    }
+
+    #[test]
+    fn valid_workflow() {
+        let w = wf(json!({
+            "id": "notificar", "name": "Notificar",
+            "steps": [
+                {"id": "espera", "type": "wait", "durationMs": 10},
+                {"id": "check", "type": "condition", "conditions": [{"path": "vars.n", "operator": "lessThan", "value": 3}], "onTrue": "espera", "onFalse": "end"}
+            ]
+        }));
+        assert!(
+            validate_workflow(&w, &[]).is_empty(),
+            "{:?}",
+            validate_workflow(&w, &[])
+        );
+    }
+
+    #[test]
+    fn detects_problems() {
+        let w = wf(json!({
+            "id": "x", "name": "",
+            "maxSteps": 0,
+            "steps": [
+                {"id": "a", "type": "http", "method": "*", "url": "ftp://x", "timeoutMs": 0, "expectedStatus": ["9xx"], "retry": {"maxAttempts": 50}},
+                {"id": "a", "type": "condition", "conditions": [], "onTrue": "nope"},
+                {"id": "end", "type": "runWorkflow", "workflowId": "x"},
+                {"id": "c", "type": "wait", "durationMs": 999999999999u64}
+            ]
+        }));
+        let fields: Vec<String> = validate_workflow(&w, &[])
+            .into_iter()
+            .map(|i| i.field)
+            .collect();
+        for f in [
+            "name",
+            "maxSteps",
+            "steps[0].url",
+            "steps[0].method",
+            "steps[0].timeoutMs",
+            "steps[0].expectedStatus[0]",
+            "steps[0].retry.maxAttempts",
+            "steps[1].id",
+            "steps[1].conditions",
+            "steps[1].onTrue",
+            "steps[2].id",
+            "steps[2].workflowId",
+            "steps[3].durationMs",
+        ] {
+            assert!(fields.iter().any(|x| x == f), "falta {f} en {fields:?}");
+        }
     }
 }

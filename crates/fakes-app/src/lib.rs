@@ -12,6 +12,7 @@ mod history;
 mod merge;
 mod seed;
 pub mod views;
+mod workflows;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -45,6 +46,16 @@ pub enum AppEvent {
     ConfigChanged { workspace_id: String },
     /// Cambió el estado de ejecución (servicios iniciados/detenidos, puertos).
     RuntimeChanged { workspace_id: String },
+    /// Una ejecución de workflow cambió de estado.
+    Execution(fakes_store::ExecutionSummary),
+    /// Un workflow emitió un evento (paso `emit`).
+    WorkflowEvent {
+        execution_id: String,
+        workflow_id: String,
+        service_id: String,
+        event: String,
+        data: Value,
+    },
 }
 
 /// Opciones de arranque.
@@ -70,7 +81,7 @@ impl AppOptions {
     }
 }
 
-struct Active {
+pub(crate) struct Active {
     dir: PathBuf,
     workspace: Workspace,
     services: Vec<Service>,
@@ -90,6 +101,7 @@ pub struct FakesApp {
     inner: Mutex<Inner>,
     events: broadcast::Sender<AppEvent>,
     history_keep: Arc<AtomicU32>,
+    engine: Arc<fakes_workflow::WorkflowEngine>,
 }
 
 fn default_workspaces_dir(data_dir: &Path) -> PathBuf {
@@ -139,7 +151,16 @@ impl FakesApp {
         let (events, _) = broadcast::channel(1024);
         let history_keep = Arc::new(AtomicU32::new(active.workspace.history.max_entries));
         let sink = history::HistorySink::spawn(store.clone(), events.clone(), history_keep.clone());
-        let state = ServerState::new(build_snapshot(&active), sink);
+        let engine = fakes_workflow::WorkflowEngine::new(
+            store.clone(),
+            Arc::new(workflows::EventsObserver(events.clone())),
+        );
+        engine.set_catalog(workflows::build_catalog(&active));
+        let state = ServerState::with_workflows(
+            build_snapshot(&active),
+            sink,
+            Arc::new(workflows::EngineStarter(Arc::downgrade(&engine))),
+        );
         let server = MockServer::new(state);
 
         let app = Arc::new(Self {
@@ -149,8 +170,14 @@ impl FakesApp {
             inner: Mutex::new(Inner { registry, active }),
             events,
             history_keep,
+            engine,
         });
         app.server.reconcile().await;
+        match app.engine.recover().await {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("{n} ejecuciones de workflows retomadas"),
+            Err(e) => tracing::warn!("no se pudieron retomar ejecuciones: {e}"),
+        }
         Ok(app)
     }
 
@@ -167,7 +194,12 @@ impl FakesApp {
     }
 
     pub async fn shutdown(&self) {
+        self.engine.shutdown().await;
         self.server.shutdown().await;
+    }
+
+    pub fn engine(&self) -> &Arc<fakes_workflow::WorkflowEngine> {
+        &self.engine
     }
 
     /// Recompila y publica la configuración activa.
@@ -176,6 +208,8 @@ impl FakesApp {
             inner.active.workspace.history.max_entries,
             Ordering::Relaxed,
         );
+        self.engine
+            .set_catalog(workflows::build_catalog(&inner.active));
         self.server.apply(build_snapshot(&inner.active)).await;
         let workspace_id = inner.active.workspace.id.clone();
         let _ = self.events.send(if config_changed {
@@ -213,6 +247,8 @@ impl FakesApp {
                 .count(),
             endpoints_total: a.services.iter().map(|s| s.endpoints.len()).sum(),
             requests_total: self.store.count_requests(&a.workspace.id).await?,
+            executions_active: self.store.count_active_executions(&a.workspace.id).await?,
+            workflows_total: a.services.iter().map(|s| s.workflows.len()).sum(),
             problems: a.problems.clone(),
         })
     }
@@ -372,10 +408,18 @@ impl FakesApp {
             .cloned()
             .ok_or_else(|| AppError::NotFound(format!("no existe el espacio '{id}'")))?;
         let active = load_active(&entry.path, &self.opts)?;
+        // Las ejecuciones del espacio anterior quedan pausadas y se retoman al volver.
+        let switching = inner.active.workspace.id != active.workspace.id;
+        if switching {
+            self.engine.suspend_all().await;
+        }
         inner.active = active;
         inner.registry.active = Some(id.to_string());
         inner.registry.save(&self.opts.data_dir)?;
         self.publish(&inner, true).await;
+        if switching && let Err(e) = self.engine.recover().await {
+            tracing::warn!("no se pudieron retomar ejecuciones: {e}");
+        }
         Ok(workspace_view(&inner.active))
     }
 
@@ -479,13 +523,28 @@ impl FakesApp {
         };
         svc.schema_version = fakes_domain::SCHEMA_VERSION;
         let endpoints = std::mem::take(&mut svc.endpoints);
+        let workflows = std::mem::take(&mut svc.workflows);
         let mut issues = self.check_service(a, &svc);
+        let mut wf_prepared: Vec<fakes_domain::Workflow> = Vec::new();
+        for mut wf in workflows {
+            workflows::normalize_workflow(&mut wf, &wf_prepared);
+            wf_prepared.push(wf);
+        }
+        let wf_ids: Vec<&str> = wf_prepared.iter().map(|w| w.id.as_str()).collect();
+        for (i, wf) in wf_prepared.iter().enumerate() {
+            let siblings: Vec<&fakes_domain::Workflow> = wf_prepared[..i].iter().collect();
+            issues.extend(
+                workflows::full_workflow_issues(wf, &siblings, &wf_ids)
+                    .into_iter()
+                    .map(|is| Issue::new(format!("workflows[{i}].{}", is.field), is.message)),
+            );
+        }
         let mut prepared: Vec<Endpoint> = Vec::new();
         for (i, mut ep) in endpoints.into_iter().enumerate() {
             normalize_endpoint(&mut ep, &prepared);
             let siblings: Vec<&Endpoint> = prepared.iter().collect();
             issues.extend(
-                full_endpoint_issues(&ep, &siblings)
+                full_endpoint_issues(&ep, &siblings, &wf_ids)
                     .into_iter()
                     .map(|is| Issue::new(format!("endpoints[{i}].{}", is.field), is.message)),
             );
@@ -495,6 +554,7 @@ impl FakesApp {
             return Err(AppError::Validation(issues));
         }
         svc.endpoints = prepared;
+        svc.workflows = wf_prepared;
         fakes_config::save_service_full(&a.dir, &svc)?;
         let id = svc.id.clone();
         if svc.auto_start {
@@ -517,6 +577,9 @@ impl FakesApp {
         svc.prefix = normalize_prefix(&svc.prefix);
         if svc.endpoints.is_empty() {
             svc.endpoints = current.endpoints.clone();
+        }
+        if svc.workflows.is_empty() {
+            svc.workflows = current.workflows.clone();
         }
         let issues = self.check_service(&inner.active, &svc);
         if !issues.is_empty() {
@@ -542,6 +605,7 @@ impl FakesApp {
             let inner = self.inner.lock().await;
             let mut s = find_service(&inner.active, id)?.clone();
             s.endpoints.clear();
+            s.workflows.clear();
             s
         };
         let merged: Service = merge::apply(&current, patch)?;
@@ -649,7 +713,7 @@ impl FakesApp {
         }
         normalize_endpoint(&mut ep, &svc.endpoints);
         let siblings: Vec<&Endpoint> = svc.endpoints.iter().collect();
-        let issues = full_endpoint_issues(&ep, &siblings);
+        let issues = full_endpoint_issues(&ep, &siblings, &workflow_ids(svc));
         if !issues.is_empty() {
             return Err(AppError::Validation(issues));
         }
@@ -683,7 +747,7 @@ impl FakesApp {
             .collect();
         normalize_endpoint(&mut ep, &others);
         let siblings: Vec<&Endpoint> = others.iter().collect();
-        let issues = full_endpoint_issues(&ep, &siblings);
+        let issues = full_endpoint_issues(&ep, &siblings, &workflow_ids(svc));
         if !issues.is_empty() {
             return Err(AppError::Validation(issues));
         }
@@ -767,7 +831,7 @@ impl FakesApp {
             .collect();
         normalize_endpoint(&mut ep, &others);
         let siblings: Vec<&Endpoint> = others.iter().collect();
-        let issues = full_endpoint_issues(&ep, &siblings);
+        let issues = full_endpoint_issues(&ep, &siblings, &workflow_ids(svc));
         Ok(ValidationReport {
             valid: issues.is_empty(),
             issues,
@@ -833,14 +897,14 @@ fn build_snapshot(a: &Active) -> Snapshot {
     }
 }
 
-fn find_service<'a>(a: &'a Active, id: &str) -> AppResult<&'a Service> {
+pub(crate) fn find_service<'a>(a: &'a Active, id: &str) -> AppResult<&'a Service> {
     a.services
         .iter()
         .find(|s| s.id == id)
         .ok_or_else(|| error::not_found_service(id))
 }
 
-fn find_service_mut<'a>(a: &'a mut Active, id: &str) -> AppResult<&'a mut Service> {
+pub(crate) fn find_service_mut<'a>(a: &'a mut Active, id: &str) -> AppResult<&'a mut Service> {
     a.services
         .iter_mut()
         .find(|s| s.id == id)
@@ -856,7 +920,7 @@ fn central_url(a: &Active) -> String {
     format!("http://{}:{}", display_host(&s.host), s.port)
 }
 
-fn service_url(a: &Active, svc: &Service) -> String {
+pub(crate) fn service_url(a: &Active, svc: &Service) -> String {
     format!("{}{}", central_url(a), normalize_prefix(&svc.prefix))
 }
 
@@ -892,6 +956,7 @@ fn workspace_view(a: &Active) -> WorkspaceView {
                 running: a.running.contains(&s.id),
                 url: service_url(a, s),
                 endpoint_count: s.endpoints.len(),
+                workflow_count: s.workflows.len(),
             })
             .collect(),
     }
@@ -927,13 +992,36 @@ fn normalize_endpoint(ep: &mut Endpoint, siblings: &[Endpoint]) {
 }
 
 /// Validación estructural + sintaxis de plantillas.
-fn full_endpoint_issues(ep: &Endpoint, siblings: &[&Endpoint]) -> Vec<Issue> {
+fn workflow_ids(svc: &Service) -> Vec<&str> {
+    svc.workflows.iter().map(|w| w.id.as_str()).collect()
+}
+
+fn full_endpoint_issues(
+    ep: &Endpoint,
+    siblings: &[&Endpoint],
+    workflow_ids: &[&str],
+) -> Vec<Issue> {
     let mut issues = validate_endpoint(ep, siblings);
     for (i, sc) in ep.scenarios.iter().enumerate() {
         issues.extend(fakes_response::validate_templates(
             &format!("scenarios[{i}].response"),
             &sc.response,
         ));
+        for (j, link) in sc.workflows.iter().enumerate() {
+            let base = format!("scenarios[{i}].workflows[{j}]");
+            if !workflow_ids.contains(&link.workflow_id.as_str()) {
+                issues.push(Issue::new(
+                    format!("{base}.workflowId"),
+                    format!("el servicio no tiene el workflow '{}'", link.workflow_id),
+                ));
+            }
+            for (k, v) in &link.input {
+                issues.extend(fakes_response::validate_template_json(
+                    &format!("{base}.input.{k}"),
+                    v,
+                ));
+            }
+        }
     }
     if let Some(r) = &ep.on_validation_error {
         issues.extend(fakes_response::validate_templates("onValidationError", r));

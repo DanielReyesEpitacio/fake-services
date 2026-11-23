@@ -8,6 +8,7 @@
 //!   files/                       # archivos servidos por respuestas `file`
 //!   services/<servicio>/service.json
 //!   services/<servicio>/endpoints/<endpoint>.json
+//!   services/<servicio>/workflows/<workflow>.json
 //! ```
 //!
 //! Los archivos se escriben de forma atómica (temporal + rename) y con
@@ -17,7 +18,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use fakes_domain::{Endpoint, Service, Workspace};
+use fakes_domain::{Endpoint, Service, Workflow, Workspace};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
@@ -25,6 +26,7 @@ pub const WORKSPACE_FILE: &str = "fakes.workspace.json";
 pub const SERVICES_DIR: &str = "services";
 pub const SERVICE_FILE: &str = "service.json";
 pub const ENDPOINTS_DIR: &str = "endpoints";
+pub const WORKFLOWS_DIR: &str = "workflows";
 pub const FILES_DIR: &str = "files";
 pub const REGISTRY_FILE: &str = "workspaces.json";
 
@@ -146,6 +148,12 @@ pub fn endpoint_file(ws_dir: &Path, service_id: &str, endpoint_id: &str) -> Path
         .join(format!("{endpoint_id}.json"))
 }
 
+pub fn workflow_file(ws_dir: &Path, service_id: &str, workflow_id: &str) -> PathBuf {
+    service_dir(ws_dir, service_id)
+        .join(WORKFLOWS_DIR)
+        .join(format!("{workflow_id}.json"))
+}
+
 pub fn is_workspace_dir(dir: &Path) -> bool {
     dir.join(WORKSPACE_FILE).is_file()
 }
@@ -209,37 +217,16 @@ pub fn load_workspace(dir: &Path) -> Result<LoadedWorkspace> {
             });
             service.id = folder.to_string();
         }
-        service.endpoints.clear();
-        let edir = sdir.join(ENDPOINTS_DIR);
-        let mut files: Vec<PathBuf> = fs::read_dir(&edir)
-            .map(|rd| {
-                rd.filter_map(|e| e.ok())
-                    .map(|e| e.path())
-                    .filter(|p| p.extension().is_some_and(|x| x == "json"))
-                    .collect()
-            })
-            .unwrap_or_default();
-        files.sort();
-        for efile in files {
-            match read_json::<Endpoint>(&efile) {
-                Ok(mut ep) => {
-                    let stem = efile.file_stem().and_then(|n| n.to_str()).unwrap_or("");
-                    if ep.id != stem {
-                        problems.push(LoadProblem {
-                            file: rel(dir, &efile),
-                            message: format!(
-                                "el id '{}' no coincide con el archivo; se usa '{stem}'",
-                                ep.id
-                            ),
-                        });
-                        ep.id = stem.to_string();
-                    }
-                    service.endpoints.push(ep);
-                }
-                Err(e) => problems.push(problem(dir, &efile, &e)),
-            }
-        }
+        service.endpoints =
+            load_documents::<Endpoint>(dir, &sdir.join(ENDPOINTS_DIR), &mut problems, |e| {
+                &mut e.id
+            });
         sort_endpoints(&mut service.endpoints);
+        service.workflows =
+            load_documents::<Workflow>(dir, &sdir.join(WORKFLOWS_DIR), &mut problems, |w| {
+                &mut w.id
+            });
+        service.workflows.sort_by_key(|a| a.name.to_lowercase());
         services.push(service);
     }
     services.sort_by_key(|a| a.name.to_lowercase());
@@ -250,6 +237,45 @@ pub fn load_workspace(dir: &Path) -> Result<LoadedWorkspace> {
         services,
         problems,
     })
+}
+
+/// Carga los JSON de una carpeta; el id de cada documento es el nombre del archivo.
+fn load_documents<T: DeserializeOwned>(
+    root: &Path,
+    folder: &Path,
+    problems: &mut Vec<LoadProblem>,
+    id_of: impl Fn(&mut T) -> &mut String,
+) -> Vec<T> {
+    let mut files: Vec<PathBuf> = fs::read_dir(folder)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|x| x == "json"))
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    let mut out = Vec::new();
+    for file in files {
+        match read_json::<T>(&file) {
+            Ok(mut doc) => {
+                let stem = file.file_stem().and_then(|n| n.to_str()).unwrap_or("");
+                let id = id_of(&mut doc);
+                if id != stem {
+                    problems.push(LoadProblem {
+                        file: rel(root, &file),
+                        message: format!(
+                            "el id '{id}' no coincide con el archivo; se usa '{stem}'"
+                        ),
+                    });
+                    *id = stem.to_string();
+                }
+                out.push(doc);
+            }
+            Err(e) => problems.push(problem(root, &file, &e)),
+        }
+    }
+    out
 }
 
 /// Orden estable para mostrar endpoints: por ruta y luego por método.
@@ -280,32 +306,56 @@ fn problem(root: &Path, file: &Path, e: &ConfigError) -> LoadProblem {
     }
 }
 
-/// Guarda `service.json` (sin endpoints; esos van en archivos propios).
+/// Guarda `service.json` (sin endpoints ni workflows; van en archivos propios).
 pub fn save_service(ws_dir: &Path, service: &Service) -> Result<()> {
     let mut meta = service.clone();
     meta.endpoints.clear();
+    meta.workflows.clear();
     write_json(&service_dir(ws_dir, &service.id).join(SERVICE_FILE), &meta)
 }
 
-/// Guarda el servicio y todos sus endpoints, eliminando archivos sobrantes.
+/// Guarda el servicio con sus endpoints y workflows, eliminando archivos sobrantes.
 pub fn save_service_full(ws_dir: &Path, service: &Service) -> Result<()> {
     save_service(ws_dir, service)?;
-    let edir = service_dir(ws_dir, &service.id).join(ENDPOINTS_DIR);
-    fs::create_dir_all(&edir).map_err(io_err(&edir))?;
     for ep in &service.endpoints {
         save_endpoint(ws_dir, &service.id, ep)?;
     }
-    if let Ok(rd) = fs::read_dir(&edir) {
+    for wf in &service.workflows {
+        save_workflow(ws_dir, &service.id, wf)?;
+    }
+    let sdir = service_dir(ws_dir, &service.id);
+    let ep_ids: Vec<&str> = service.endpoints.iter().map(|e| e.id.as_str()).collect();
+    let wf_ids: Vec<&str> = service.workflows.iter().map(|w| w.id.as_str()).collect();
+    remove_stale(&sdir.join(ENDPOINTS_DIR), &ep_ids)?;
+    remove_stale(&sdir.join(WORKFLOWS_DIR), &wf_ids)?;
+    Ok(())
+}
+
+fn remove_stale(folder: &Path, keep: &[&str]) -> Result<()> {
+    if let Ok(rd) = fs::read_dir(folder) {
         for entry in rd.filter_map(|e| e.ok()) {
             let p = entry.path();
             let stem = p.file_stem().and_then(|n| n.to_str()).unwrap_or("");
             let is_json = p.extension().is_some_and(|x| x == "json");
-            if is_json && !service.endpoints.iter().any(|e| e.id == stem) {
+            if is_json && !keep.contains(&stem) {
                 fs::remove_file(&p).map_err(io_err(&p))?;
             }
         }
     }
     Ok(())
+}
+
+pub fn save_workflow(ws_dir: &Path, service_id: &str, wf: &Workflow) -> Result<()> {
+    write_json(&workflow_file(ws_dir, service_id, &wf.id), wf)
+}
+
+pub fn delete_workflow(ws_dir: &Path, service_id: &str, workflow_id: &str) -> Result<()> {
+    let f = workflow_file(ws_dir, service_id, workflow_id);
+    match fs::remove_file(&f) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(io_err(&f)(e)),
+    }
 }
 
 pub fn delete_service(ws_dir: &Path, service_id: &str) -> Result<()> {
@@ -395,6 +445,7 @@ mod tests {
             auto_start: true,
             variables: Default::default(),
             auth: AuthConfig::Bearer { token: None },
+            workflows: vec![serde_json::from_value(json!({"id": "notificar", "name": "Notificar", "steps": [{"id": "espera", "type": "wait", "durationMs": 10}]})).unwrap()],
             endpoints: vec![Endpoint {
                 schema_version: 1,
                 id: "post-documents-id-sign".into(),
@@ -410,6 +461,7 @@ mod tests {
                     description: String::new(),
                     enabled: true,
                     rule_mode: RuleMode::All,
+                    workflows: vec![],
                     rules: vec![],
                     response: ResponseDef::json(201, json!({"status": "pending"})),
                 }],
@@ -435,17 +487,24 @@ mod tests {
         assert_eq!(loaded.workspace, ws);
         assert_eq!(loaded.services, vec![svc.clone()]);
 
-        // service.json no debe contener endpoints
+        // service.json no debe contener endpoints ni workflows
         let raw = fs::read_to_string(dir.join("services/mifiel/service.json")).unwrap();
         assert!(!raw.contains("endpoints"));
+        assert!(!raw.contains("workflows"));
+        assert!(
+            dir.join("services/mifiel/workflows/notificar.json")
+                .is_file()
+        );
         assert!(raw.ends_with('\n'));
 
         // eliminar endpoint sobrante al guardar completo
         let mut svc2 = svc.clone();
         svc2.endpoints.clear();
+        svc2.workflows.clear();
         save_service_full(&dir, &svc2).unwrap();
         let loaded = load_workspace(&dir).unwrap();
         assert!(loaded.services[0].endpoints.is_empty());
+        assert!(loaded.services[0].workflows.is_empty());
 
         delete_service(&dir, "mifiel").unwrap();
         assert!(load_workspace(&dir).unwrap().services.is_empty());

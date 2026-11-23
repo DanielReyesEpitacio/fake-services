@@ -8,11 +8,15 @@ pub mod exchange;
 pub mod model;
 pub mod path;
 pub mod validate;
+pub mod workflow;
 
 pub use exchange::{IncomingRequest, lookup_path};
 pub use model::*;
 pub use path::{PathTemplate, Segment, normalize_prefix};
 pub use validate::Issue;
+pub use workflow::{
+    Action, Condition, HttpAction, StartWhen, Step, StepBody, Workflow, WorkflowLink,
+};
 
 /// Convierte un texto en un identificador válido: `"AWS S3"` → `"aws-s3"`.
 pub fn slugify(input: &str) -> String {

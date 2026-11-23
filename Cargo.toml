@@ -7,6 +7,7 @@ members = [
     "crates/fakes-response",
     "crates/fakes-store",
     "crates/fakes-server",
+    "crates/fakes-workflow",
     "crates/fakes-app",
     "crates/fakes-api",
     "crates/fakes-cli",
@@ -21,6 +22,7 @@ default-members = [
     "crates/fakes-response",
     "crates/fakes-store",
     "crates/fakes-server",
+    "crates/fakes-workflow",
     "crates/fakes-app",
     "crates/fakes-api",
     "crates/fakes-cli",
@@ -40,6 +42,7 @@ fakes-matching = { path = "crates/fakes-matching" }
 fakes-response = { path = "crates/fakes-response" }
 fakes-store = { path = "crates/fakes-store" }
 fakes-server = { path = "crates/fakes-server" }
+fakes-workflow = { path = "crates/fakes-workflow" }
 fakes-app = { path = "crates/fakes-app" }
 fakes-api = { path = "crates/fakes-api" }
 
