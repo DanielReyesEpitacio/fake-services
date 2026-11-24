@@ -462,6 +462,8 @@ mod tests {
                     enabled: true,
                     rule_mode: RuleMode::All,
                     workflows: vec![],
+                    probability: None,
+                    resource: None,
                     rules: vec![],
                     response: ResponseDef::json(201, json!({"status": "pending"})),
                 }],

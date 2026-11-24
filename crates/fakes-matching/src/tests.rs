@@ -10,6 +10,8 @@ fn scenario(id: &str, rules: Vec<Rule>, status: u16) -> Scenario {
         enabled: true,
         rule_mode: RuleMode::All,
         workflows: vec![],
+        probability: None,
+        resource: None,
         rules,
         response: ResponseDef::json(status, json!({"s": id})),
     }

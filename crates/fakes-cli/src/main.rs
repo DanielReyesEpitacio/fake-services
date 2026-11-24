@@ -73,6 +73,12 @@ enum Command {
         #[command(flatten)]
         admin: AdminArgs,
     },
+    /// Servidor MCP por stdio para agentes de IA (Claude Code, Cursor...).
+    /// Usa la instancia en ejecución o inicia una si no hay.
+    Mcp {
+        #[command(flatten)]
+        admin: AdminArgs,
+    },
     /// Muestra el token de la API de administración (para agentes y scripts).
     Token,
     /// Muestra las carpetas y archivos que usa Fake Services.
@@ -81,15 +87,18 @@ enum Command {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    // En modo MCP, stdout es el canal del protocolo: los logs van a stderr.
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "info,sqlx=warn,tower_http=warn".into()),
         )
         .with_target(false)
+        .with_writer(std::io::stderr)
+        .with_ansi(!matches!(cli.command, Some(Command::Mcp { .. })))
         .init();
 
-    let cli = Cli::parse();
     let data_dir = cli.data_dir.unwrap_or_else(fakes_config::default_data_dir);
 
     match cli.command {
@@ -118,6 +127,7 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
         Some(Command::Detener { admin }) => stop(&data_dir, &admin),
+        Some(Command::Mcp { admin }) => mcp(data_dir, admin).await,
         Some(Command::Token) => {
             println!("{}", fakes_api::load_or_create_token(&data_dir)?);
             Ok(())
@@ -135,6 +145,78 @@ async fn main() -> anyhow::Result<()> {
             Ok(())
         }
     }
+}
+
+/// MCP por stdio: un mensaje JSON-RPC por línea.
+async fn mcp(data_dir: PathBuf, admin: AdminArgs) -> anyhow::Result<()> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let mut stdin = BufReader::new(tokio::io::stdin()).lines();
+    let mut stdout = tokio::io::stdout();
+
+    if is_running(&admin) {
+        // Puente hacia la instancia que ya corre (misma configuración que la interfaz).
+        let token = fakes_api::load_or_create_token(&data_dir)?;
+        let url = format!("{}/mcp", admin_url(&admin));
+        let client = reqwest::Client::builder().no_proxy().build()?;
+        tracing::info!("MCP conectado a la instancia en ejecución ({url})");
+        while let Some(line) = stdin.next_line().await? {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let resp = client
+                .post(&url)
+                .bearer_auth(&token)
+                .header("content-type", "application/json")
+                .body(line.clone())
+                .send()
+                .await;
+            let out = match resp {
+                Ok(r) if r.status().as_u16() == 202 => continue,
+                Ok(r) => r.text().await.unwrap_or_default(),
+                Err(e) => {
+                    let id = serde_json::from_str::<serde_json::Value>(&line)
+                        .ok()
+                        .and_then(|v| v.get("id").cloned())
+                        .unwrap_or(serde_json::Value::Null);
+                    serde_json::json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32603, "message": format!("Fake Services no respondió: {e}")}}).to_string()
+                }
+            };
+            stdout.write_all(out.trim_end().as_bytes()).await?;
+            stdout.write_all(b"\n").await?;
+            stdout.flush().await?;
+        }
+        return Ok(());
+    }
+
+    // Sin instancia: se inicia aquí (con la interfaz web disponible) mientras dure la sesión.
+    let mut opts = LaunchOptions::new(data_dir);
+    opts.admin_host = admin.admin_host.clone();
+    opts.admin_port = admin.admin_port;
+    let launched = fakes_api::launch(opts).await?;
+    tracing::info!(
+        "Fake Services iniciado para MCP; interfaz en {}",
+        launched.admin_url
+    );
+    let server = fakes_mcp::McpServer::new(launched.app.clone());
+    while let Some(line) = stdin.next_line().await? {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let reply = match serde_json::from_str::<serde_json::Value>(&line) {
+            Ok(msg) => server.handle_payload(msg).await,
+            Err(e) => Some(
+                serde_json::json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": format!("JSON inválido: {e}")}}),
+            ),
+        };
+        if let Some(r) = reply {
+            stdout.write_all(r.to_string().as_bytes()).await?;
+            stdout.write_all(b"\n").await?;
+            stdout.flush().await?;
+        }
+    }
+    launched.shutdown().await;
+    Ok(())
 }
 
 /// Pide a la instancia en ejecución que se detenga y espera a que lo haga.

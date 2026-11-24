@@ -11,8 +11,11 @@ pub mod bundle;
 mod error;
 mod history;
 mod merge;
+mod resources;
 mod seed;
+pub mod specs;
 pub mod system;
+pub mod templates;
 pub mod views;
 mod workflows;
 
@@ -35,7 +38,11 @@ use tokio::sync::{Mutex, broadcast};
 
 pub use bundle::{Bundle, ExportOptions, ImportReport, ImportRequest};
 pub use error::{AppError, AppResult, ErrorBody};
+pub use fakes_import::detect::DetectionReport;
+pub use fakes_store::{CollectionInfo, ResourceRecord};
+pub use specs::{SpecImportReport, SpecImportRequest};
 pub use system::AutostartStatus;
+pub use templates::{TemplateInfo, TemplateInstallReport, TemplateInstallRequest};
 pub use views::*;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -161,10 +168,11 @@ impl FakesApp {
             Arc::new(workflows::EventsObserver(events.clone())),
         );
         engine.set_catalog(workflows::build_catalog(&active));
-        let state = ServerState::with_workflows(
+        let state = ServerState::full(
             build_snapshot(&active),
             sink,
             Arc::new(workflows::EngineStarter(Arc::downgrade(&engine))),
+            store.clone(),
         );
         let server = MockServer::new(state);
 
@@ -632,6 +640,9 @@ impl FakesApp {
         let mut inner = self.inner.lock().await;
         find_service(&inner.active, id)?;
         fakes_config::delete_service(&inner.active.dir, id)?;
+        self.store
+            .resource_clear(&inner.active.workspace.id, id, None)
+            .await?;
         inner.active.services.retain(|s| s.id != id);
         inner.active.running.remove(id);
         self.publish(&inner, true).await;
@@ -910,6 +921,7 @@ fn build_snapshot(a: &Active) -> Snapshot {
         compiled: CompiledWorkspace::compile(a.workspace.clone(), a.services.clone()),
         running: a.running.clone(),
         files_root: Some(a.dir.join(fakes_config::FILES_DIR)),
+        call_counts: Default::default(),
     }
 }
 

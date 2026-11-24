@@ -622,6 +622,7 @@ dependencies = [
  "axum",
  "fakes-app",
  "fakes-domain",
+ "fakes-mcp",
  "fakes-store",
  "fastrand",
  "futures-util",
@@ -649,6 +650,7 @@ dependencies = [
  "directories",
  "fakes-config",
  "fakes-domain",
+ "fakes-import",
  "fakes-matching",
  "fakes-response",
  "fakes-server",
@@ -672,6 +674,9 @@ dependencies = [
  "fakes-api",
  "fakes-app",
  "fakes-config",
+ "fakes-mcp",
+ "reqwest",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -704,14 +709,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "fakes-import"
+version = "0.1.0"
+dependencies = [
+ "fakes-domain",
+ "regex",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "walkdir",
+]
+
+[[package]]
 name = "fakes-matching"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "fakes-domain",
+ "fastrand",
  "jsonschema",
  "regex",
  "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "fakes-mcp"
+version = "0.1.0"
+dependencies = [
+ "fakes-app",
+ "fakes-domain",
+ "fakes-store",
+ "reqwest",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
  "tracing",
 ]
 
@@ -739,6 +775,7 @@ version = "0.1.0"
 dependencies = [
  "arc-swap",
  "axum",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "fakes-domain",
@@ -749,6 +786,7 @@ dependencies = [
  "futures-util",
  "http",
  "http-body-util",
+ "minijinja",
  "multer",
  "serde",
  "serde_json",
@@ -2392,6 +2430,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_yaml"
+version = "0.9.34+deprecated"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
+dependencies = [
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
+]
+
+[[package]]
 name = "sha1"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3109,6 +3160,12 @@ name = "unicode-properties"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "993ad287eb20e8ba755312801cfe1413e0f25d604075863acaddca10b04c1833"
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"

@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 
 use crate::body::parse_body;
 use crate::{ServerState, Snapshot, WorkflowTrigger, display_host};
+use base64::Engine;
 use fakes_domain::{StartWhen, WorkflowLink};
 
 /// Rutas reservadas del propio simulador (`/__fakes/health`).
@@ -260,6 +261,9 @@ async fn process(ctx: &ListenerCtx, snap: &Snapshot, req: &mut IncomingRequest) 
         }
     };
     req.params = params;
+    req.call_number = snap
+        .call_counts
+        .next(&format!("{}/{}", svc.service.id, endpoint.endpoint.id));
 
     // 3. Autenticación
     if let Err(reason) = svc.check_auth(req) {
@@ -315,6 +319,57 @@ async fn process(ctx: &ListenerCtx, snap: &Snapshot, req: &mut IncomingRequest) 
 
     let mut ctx_value = base_ctx;
     ctx_value["scenario"] = json!({ "id": scenario.id, "name": scenario.name });
+
+    // Recurso simulado persistente (antes de responder y de iniciar workflows).
+    if let Some(action) = &scenario.resource {
+        match apply_resource(ctx, snap, &svc.service.id, action, &ctx_value).await {
+            Ok(ResourceResult::Record(r)) => ctx_value["resource"] = r,
+            Ok(ResourceResult::List(items)) => {
+                ctx_value["resources"] = Value::Array(items);
+            }
+            Ok(ResourceResult::Missing(id)) => {
+                let def = action.on_missing.clone().unwrap_or_else(|| {
+                    ResponseDef::json(
+                        404,
+                        json!({
+                            "error": "not_found",
+                            "message": format!("no existe {}/{}", action.collection, id),
+                        }),
+                    )
+                });
+                let mut h = match render_response(&def, &ctx_value, snap.files_root.as_deref()) {
+                    Ok(r) => Handled {
+                        rendered: r,
+                        outcome: Outcome::Matched,
+                        message: Some(format!("{}/{id} no existe", action.collection)),
+                        service_id: None,
+                        endpoint_id: None,
+                        scenario_id: None,
+                        links: Vec::new(),
+                        scope: Value::Null,
+                        executions: Vec::new(),
+                    },
+                    Err(e) => Handled::error(
+                        500,
+                        Outcome::Error,
+                        "template_error",
+                        e.to_string(),
+                        json!({}),
+                    ),
+                }
+                .for_service(svc);
+                h.endpoint_id = Some(endpoint.endpoint.id.clone());
+                h.scenario_id = Some(scenario.id.clone());
+                return h;
+            }
+            Err(e) => {
+                let mut h = Handled::error(500, Outcome::Error, "resource_error", e, json!({}))
+                    .for_service(svc);
+                h.endpoint_id = Some(endpoint.endpoint.id.clone());
+                return h;
+            }
+        }
+    }
 
     let mut handled =
         match render_response(&scenario.response, &ctx_value, snap.files_root.as_deref()) {
@@ -452,6 +507,8 @@ fn template_context(
             "contentType": req.content_type,
             "body": req.body,
             "rawBody": req.body_text(),
+            "rawBodyBase64": base64::engine::general_purpose::STANDARD.encode(&req.raw_body),
+            "callNumber": req.call_number,
             "ip": req.remote_addr,
         },
         "vars": svc.vars,
@@ -468,6 +525,57 @@ fn template_context(
             "path": endpoint.endpoint.path,
         },
         "workspace": { "id": snap.compiled.workspace.id, "name": snap.compiled.workspace.name },
+    })
+}
+
+enum ResourceResult {
+    Record(Value),
+    List(Vec<Value>),
+    Missing(String),
+}
+
+async fn apply_resource(
+    ctx: &ListenerCtx,
+    snap: &Snapshot,
+    service_id: &str,
+    action: &fakes_domain::ResourceAction,
+    scope: &Value,
+) -> Result<ResourceResult, String> {
+    let Some(store) = &ctx.state.store else {
+        return Err("los recursos persistentes no están disponibles".into());
+    };
+    let mj = minijinja::Value::from_serialize(scope);
+    let id = fakes_response::render_text(&action.record_id, &mj, "resource.recordId")
+        .map_err(|e| e.to_string())?;
+    let data = action
+        .data
+        .as_ref()
+        .map(|d| fakes_response::render_json(d, &mj, "resource.data"))
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    let op = match action.operation {
+        fakes_domain::ResourceOp::Create => fakes_store::ResourceOperation::Create,
+        fakes_domain::ResourceOp::Upsert => fakes_store::ResourceOperation::Upsert,
+        fakes_domain::ResourceOp::Update => fakes_store::ResourceOperation::Update,
+        fakes_domain::ResourceOp::Get => fakes_store::ResourceOperation::Get,
+        fakes_domain::ResourceOp::Delete => fakes_store::ResourceOperation::Delete,
+        fakes_domain::ResourceOp::List => fakes_store::ResourceOperation::List,
+    };
+    let out = store
+        .resource_apply(
+            snap.workspace_id(),
+            service_id,
+            &action.collection,
+            op,
+            Some(id.as_str()),
+            data,
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(match out {
+        fakes_store::ResourceOutcome::Record(r) => ResourceResult::Record(r),
+        fakes_store::ResourceOutcome::List(l) => ResourceResult::List(l),
+        fakes_store::ResourceOutcome::Missing => ResourceResult::Missing(id),
     })
 }
 

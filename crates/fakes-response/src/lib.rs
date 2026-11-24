@@ -243,6 +243,8 @@ pub fn render_response(
             base64: b64,
             content_type,
         } => {
+            // El base64 admite plantilla (p. ej. contenido guardado en un recurso).
+            let b64 = render_text(b64, &ctx, "body.base64")?;
             let cleaned: String = b64.chars().filter(|c| !c.is_whitespace()).collect();
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(cleaned)
@@ -367,6 +369,9 @@ pub fn validate_templates(base: &str, def: &ResponseDef) -> Vec<Issue> {
         }
         ResponseBody::Text { content, .. } => {
             check_syntax(&mut issues, &format!("{base}.body.content"), content)
+        }
+        ResponseBody::Binary { base64, .. } => {
+            check_syntax(&mut issues, &format!("{base}.body.base64"), base64)
         }
         ResponseBody::File { path, .. } => {
             check_syntax(&mut issues, &format!("{base}.body.path"), path)

@@ -25,9 +25,10 @@ crates/
   fakes-matching  4. Motor de coincidencia: rutas, autenticación, validación, escenarios.
   fakes-response  5. Motor de respuestas: plantillas y construcción de respuestas.
   fakes-workflow  6. Motor de workflows: ejecuciones durables, webhooks con protección SSRF.
-  fakes-store     7. Persistencia de ejecución: SQLite (historial, clave-valor).
-  fakes-api       8. API REST + entrega de la interfaz web.
-  (fase 3)        9. Servidor MCP (usará fakes-app igual que la API REST).
+  fakes-store     7. Persistencia de ejecución: SQLite (historial, ejecuciones, recursos).
+  fakes-api       8. API REST + entrega de la interfaz web + transporte HTTP del MCP.
+  fakes-mcp       9. Servidor MCP (JSON-RPC): herramientas sobre los casos de uso de fakes-app.
+  fakes-import       Conversión de OpenAPI/Swagger y Postman a servicios; detección de integraciones.
   ui/            10. Interfaz gráfica (Vue + Vuetify).
   fakes-app       Servicios de aplicación: los casos de uso que comparten UI, REST y MCP.
   fakes-cli       Binario `fakes`: arranque, apertura del navegador, empaquetado.
@@ -43,7 +44,9 @@ domain ← matching ← server
 domain ← response ← server
 store  ← server
 domain, matching, response, store ← workflow
+import ← app
 config, matching, response, store, server, workflow ← app ← api ← cli
+app ← mcp ← api, cli
 ```
 
 `fakes-domain` no depende de nada del sistema (ni HTTP, ni disco, ni plantillas).
@@ -104,11 +107,22 @@ descarta el registro con una advertencia.
 - El servidor de simulación no depende del motor: recibe un `WorkflowStarter` (inversión de
   dependencias) que la capa de aplicación conecta con `fakes-workflow`.
 
-## Preparado para las siguientes fases
+## MCP, plantillas y recursos
 
-- **MCP** (fase 3): los tipos del dominio y las vistas derivan `JsonSchema`, de modo que los
-  esquemas de entrada y salida de cada herramienta se generan de los mismos tipos que usa REST.
-- **Recursos simulados persistentes** (fase 4): colecciones genéricas en SQLite por espacio.
+- **MCP**: implementado a mano sobre JSON-RPC 2.0 (`initialize`, `tools/list`, `tools/call`,
+  `ping`). Los tipos del dominio y las vistas derivan `JsonSchema`, así los esquemas de entrada y
+  salida de cada herramienta se generan de los mismos tipos que usa REST. `fakes mcp` habla por
+  stdio y, si ya hay una instancia corriendo, reenvía cada mensaje a su `POST /mcp`: no hay dos
+  procesos escribiendo la misma configuración.
+- **Importación de especificaciones**: `fakes-import` convierte OpenAPI/Postman en un bundle y la
+  importación reutiliza el mismo camino que un archivo exportado (validación completa, conflictos,
+  `dryRun`).
+- **Plantillas de proveedores**: bundles JSON en `templates/`, incluidos en el binario con
+  `include_str!`. Instalar una plantilla es importar su bundle; no hay código por proveedor.
+- **Recursos persistentes**: tabla `resources` en SQLite (espacio, servicio, colección, id → JSON).
+  Son estado de ejecución, no configuración; se borran con su servicio y pueden ir en un bundle.
+- **Escenarios avanzados**: el servidor cuenta las llamadas por endpoint en memoria (se reinician
+  al cambiar la configuración) y la probabilidad se evalúa después de las reglas.
 
 ## Interfaz y apariencia
 
@@ -116,7 +130,8 @@ descarta el registro con una advertencia.
 ui/src/
   app/
     configuration/   router y apariencia (catálogo de look and feels, preferencias)
-    modules/         dashboard, services, endpoints, history, workspaces, settings
+    modules/         dashboard, services, endpoints, workflows (lista y diagrama con Vue Flow),
+                     executions, resources, templates, transfer, history, workspaces, settings
     shared/          layout, componentes, estado en vivo, estilos
   infrastructure/    cliente de la API REST de administración
   platform/          módulo de temas (look and feels de Vuetify)

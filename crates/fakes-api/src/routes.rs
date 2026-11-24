@@ -78,9 +78,19 @@ pub fn router() -> Router<AppState> {
         // Importar / exportar
         .route("/export", get(export_bundle))
         .route(
+            "/import/spec",
+            post(import_spec).layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
+        .route("/validate", get(validate_all))
+        .route("/detect", post(detect_integrations))
+        .route(
             "/import",
             post(import_bundle).layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
         )
+        // Plantillas de proveedores
+        .route("/templates", get(list_templates))
+        .route("/templates/{id}", get(get_template))
+        .route("/templates/{id}/install", post(install_template))
         // Espacios de trabajo
         .route("/workspaces", get(list_workspaces).post(create_workspace))
         .route("/workspaces/register", post(register_workspace))
@@ -132,6 +142,19 @@ pub fn router() -> Router<AppState> {
         .route(
             "/services/{sid}/endpoints/{eid}/active-scenario",
             put(set_active_scenario),
+        )
+        // Recursos simulados persistentes
+        .route(
+            "/services/{sid}/resources",
+            get(list_collections).delete(clear_all_resources),
+        )
+        .route(
+            "/services/{sid}/resources/{col}",
+            get(list_resources).delete(clear_collection),
+        )
+        .route(
+            "/services/{sid}/resources/{col}/{*id}",
+            get(get_resource).put(put_resource).delete(delete_resource),
         )
         // Workflows
         .route(
@@ -592,6 +615,127 @@ async fn set_autostart(
 
 // -- importar / exportar ------------------------------------------------------
 
+async fn import_spec(
+    State(app): State<AppState>,
+    payload: Result<Json<Value>, JsonRejection>,
+) -> ApiResult<fakes_app::SpecImportReport> {
+    Ok(Json(app.import_spec(body(payload)?).await?))
+}
+
+// -- plantillas -------------------------------------------------------------
+
+async fn list_templates(State(app): State<AppState>) -> ApiResult<Vec<fakes_app::TemplateInfo>> {
+    Ok(Json(app.list_templates().await))
+}
+
+async fn get_template(Path(id): Path<String>) -> ApiResult<fakes_app::Bundle> {
+    Ok(Json(fakes_app::templates::template_bundle(&id)?))
+}
+
+async fn install_template(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    payload: Option<Json<Value>>,
+) -> ApiResult<fakes_app::TemplateInstallReport> {
+    let req: fakes_app::TemplateInstallRequest = match payload {
+        Some(Json(v)) if !v.is_null() => {
+            serde_json::from_value(v).map_err(|e| bad_request(format!("datos inválidos: {e}")))?
+        }
+        _ => Default::default(),
+    };
+    Ok(Json(app.install_template(&id, req).await?))
+}
+
+// -- recursos -----------------------------------------------------------------
+
+#[derive(Deserialize)]
+struct Page {
+    limit: Option<u32>,
+    offset: Option<u32>,
+}
+
+#[derive(serde::Serialize)]
+struct Cleared {
+    deleted: u64,
+}
+
+async fn list_collections(
+    State(app): State<AppState>,
+    Path(sid): Path<String>,
+) -> ApiResult<Vec<fakes_app::CollectionInfo>> {
+    Ok(Json(app.list_resource_collections(&sid).await?))
+}
+
+async fn clear_all_resources(
+    State(app): State<AppState>,
+    Path(sid): Path<String>,
+) -> ApiResult<Cleared> {
+    Ok(Json(Cleared {
+        deleted: app.clear_resources(&sid, None).await?,
+    }))
+}
+
+async fn list_resources(
+    State(app): State<AppState>,
+    Path((sid, col)): Path<(String, String)>,
+    Query(p): Query<Page>,
+) -> ApiResult<Vec<fakes_app::ResourceRecord>> {
+    Ok(Json(
+        app.list_resources(&sid, &col, p.limit, p.offset).await?,
+    ))
+}
+
+async fn clear_collection(
+    State(app): State<AppState>,
+    Path((sid, col)): Path<(String, String)>,
+) -> ApiResult<Cleared> {
+    Ok(Json(Cleared {
+        deleted: app.clear_resources(&sid, Some(&col)).await?,
+    }))
+}
+
+async fn get_resource(
+    State(app): State<AppState>,
+    Path((sid, col, id)): Path<(String, String, String)>,
+) -> ApiResult<fakes_app::ResourceRecord> {
+    Ok(Json(app.get_resource(&sid, &col, &id).await?))
+}
+
+async fn put_resource(
+    State(app): State<AppState>,
+    Path((sid, col, id)): Path<(String, String, String)>,
+    payload: Result<Json<Value>, JsonRejection>,
+) -> ApiResult<fakes_app::ResourceRecord> {
+    Ok(Json(
+        app.put_resource(&sid, &col, &id, raw(payload)?).await?,
+    ))
+}
+
+async fn delete_resource(
+    State(app): State<AppState>,
+    Path((sid, col, id)): Path<(String, String, String)>,
+) -> Result<StatusCode, ApiError> {
+    app.delete_resource(&sid, &col, &id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn validate_all(State(app): State<AppState>) -> ApiResult<fakes_app::ValidationReport> {
+    Ok(Json(app.validate_all().await?))
+}
+
+#[derive(Deserialize)]
+struct DetectBody {
+    path: std::path::PathBuf,
+}
+
+async fn detect_integrations(
+    State(app): State<AppState>,
+    payload: Result<Json<Value>, JsonRejection>,
+) -> ApiResult<fakes_app::DetectionReport> {
+    let b: DetectBody = body(payload)?;
+    Ok(Json(app.detect_integrations(b.path).await?))
+}
+
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct ExportQuery {
@@ -602,6 +746,8 @@ struct ExportQuery {
     workspace: bool,
     #[serde(default)]
     files: bool,
+    #[serde(default)]
+    resources: bool,
 }
 
 async fn export_bundle(
@@ -619,6 +765,7 @@ async fn export_bundle(
             .collect(),
         include_workspace: q.workspace,
         include_files: q.files,
+        include_resources: q.resources,
     };
     let bundle = app.export_bundle(&opts).await?;
     let ws = app.status().await?.workspace_id;

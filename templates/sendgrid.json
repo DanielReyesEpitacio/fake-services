@@ -1,0 +1,188 @@
+{
+  "format": "fake-services",
+  "formatVersion": 1,
+  "services": [
+    {
+      "schemaVersion": 1,
+      "id": "sendgrid",
+      "name": "SendGrid",
+      "description": "Envío de correo (API v3). Cada correo aceptado se guarda en la colección «messages» para revisarlo sin enviarlo. Si defines EVENT_WEBHOOK_URL, se envía el evento «delivered».",
+      "upstreamUrl": "https://api.sendgrid.com",
+      "prefix": "/sendgrid",
+      "variables": {
+        "EVENT_WEBHOOK_URL": ""
+      },
+      "auth": {
+        "type": "bearer"
+      },
+      "endpoints": [
+        {
+          "id": "post-v3-mail-send",
+          "name": "Enviar correo",
+          "method": "POST",
+          "path": "/v3/mail/send",
+          "scenarios": [
+            {
+              "id": "sin-destinatarios",
+              "name": "Faltan personalizations",
+              "rules": [
+                {
+                  "source": "body",
+                  "key": "personalizations.0",
+                  "operator": "notExists"
+                }
+              ],
+              "response": {
+                "status": 400,
+                "body": {
+                  "type": "json",
+                  "content": {
+                    "errors": [
+                      {
+                        "message": "The personalizations field is required and must have at least one personalization.",
+                        "field": "personalizations",
+                        "help": "http://sendgrid.com/docs/API_Reference/Web_API_v3/Mail/errors.html#-Personalizations-Errors"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "id": "ok",
+              "name": "Aceptado",
+              "rules": [],
+              "resource": {
+                "collection": "messages",
+                "operation": "create",
+                "recordId": "{{ random_hex(22) }}",
+                "data": {
+                  "from": "{{ request.body.from }}",
+                  "subject": "{{ request.body.subject }}",
+                  "personalizations": "{{ request.body.personalizations }}",
+                  "content": "{{ request.body.content or [] }}",
+                  "template_id": "{{ request.body.template_id }}",
+                  "status": "delivered",
+                  "received_at": "{{ now() }}"
+                }
+              },
+              "workflows": [
+                {
+                  "workflowId": "evento-entregado",
+                  "when": "responseSent"
+                }
+              ],
+              "response": {
+                "status": 202,
+                "headers": {
+                  "X-Message-Id": "{{ resource.id }}"
+                }
+              }
+            }
+          ],
+          "request": {
+            "body": {
+              "kind": "json",
+              "required": true,
+              "example": {
+                "personalizations": [
+                  {
+                    "to": [
+                      {
+                        "email": "ana@example.com"
+                      }
+                    ]
+                  }
+                ],
+                "from": {
+                  "email": "no-reply@example.com"
+                },
+                "subject": "Hola",
+                "content": [
+                  {
+                    "type": "text/plain",
+                    "value": "Hola Ana"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "get-v3-messages",
+          "name": "Correos enviados (simulación)",
+          "method": "GET",
+          "path": "/v3/messages",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Lista",
+              "rules": [],
+              "resource": {
+                "collection": "messages",
+                "operation": "list"
+              },
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": {
+                    "messages": "{{ resources }}"
+                  }
+                }
+              }
+            }
+          ],
+          "description": "Equivalente simplificado de Email Activity: devuelve los correos aceptados."
+        }
+      ],
+      "workflows": [
+        {
+          "id": "evento-entregado",
+          "name": "Evento delivered",
+          "steps": [
+            {
+              "id": "hay-url",
+              "type": "condition",
+              "conditions": [
+                {
+                  "path": "vars.EVENT_WEBHOOK_URL",
+                  "operator": "notEquals",
+                  "value": ""
+                }
+              ],
+              "onFalse": "fin"
+            },
+            {
+              "id": "espera",
+              "type": "wait",
+              "durationMs": 2000
+            },
+            {
+              "id": "delivered",
+              "type": "http",
+              "method": "POST",
+              "url": "{{ vars.EVENT_WEBHOOK_URL }}",
+              "body": {
+                "type": "json",
+                "content": [
+                  {
+                    "email": "{{ request.body.personalizations[0].to[0].email }}",
+                    "event": "delivered",
+                    "timestamp": "{{ now('%s') | int }}",
+                    "sg_message_id": "{{ response.headers['x-message-id'] }}",
+                    "smtp-id": "<{{ uuid() }}@fakes>"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "fin",
+              "type": "end"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -14,6 +14,7 @@ export default {
     appearance: 'Apariencia',
     executions: 'Ejecuciones',
     transfer: 'Importar y exportar',
+    templates: 'Plantillas',
   },
   stepType: {
     wait: 'Esperar',
@@ -22,6 +23,7 @@ export default {
     setVariables: 'Asignar variables',
     condition: 'Condición',
     runWorkflow: 'Ejecutar workflow',
+    resource: 'Recurso persistente',
     fail: 'Simular error',
     end: 'Finalizar',
   },
@@ -32,6 +34,7 @@ export default {
     setVariables: 'Guarda valores en vars.',
     condition: 'Evalúa datos y salta a otro paso.',
     runWorkflow: 'Inicia otro workflow del servicio.',
+    resource: 'Lee o modifica un registro guardado.',
     fail: 'Termina la ejecución con un error.',
     end: 'Termina la ejecución correctamente.',
   },
@@ -101,6 +104,7 @@ export default {
     body: 'Body',
     method: 'Método',
     variable: 'Variable',
+    callCount: 'Número de llamada',
   },
   operator: {
     equals: 'es igual a',

@@ -89,6 +89,7 @@ async function all(running: boolean) {
       <template #actions>
         <VBtn variant="tonal" prepend-icon="mdi-play" @click="all(true)">Iniciar todos</VBtn>
         <VBtn variant="tonal" prepend-icon="mdi-stop" @click="all(false)">Detener todos</VBtn>
+        <VBtn variant="tonal" prepend-icon="mdi-puzzle-outline" to="/plantillas">Desde plantilla</VBtn>
         <VBtn color="primary" prepend-icon="mdi-plus" @click="openCreate">Nuevo servicio</VBtn>
       </template>
     </PageHeader>
@@ -111,6 +112,7 @@ async function all(running: boolean) {
         text="Un servicio representa un proveedor como MiFiel, Belvo o AWS S3."
       >
         <VBtn color="primary" prepend-icon="mdi-plus" @click="openCreate">Crear el primero</VBtn>
+        <VBtn variant="tonal" prepend-icon="mdi-puzzle-outline" to="/plantillas" class="ms-2">Usar una plantilla</VBtn>
       </EmptyState>
       <VTable v-else hover class="clickable-rows">
         <thead>

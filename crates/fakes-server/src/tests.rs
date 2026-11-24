@@ -30,6 +30,8 @@ fn scenario(id: &str, rules: Vec<Rule>, response: ResponseDef) -> Scenario {
         enabled: true,
         rule_mode: RuleMode::All,
         workflows: vec![],
+        probability: None,
+        resource: None,
         rules,
         response,
     }
@@ -102,6 +104,7 @@ fn setup() -> (Arc<ServerState>, Arc<MemSink>) {
         compiled,
         running: HashSet::from(["mifiel".to_string()]),
         files_root: None,
+        call_counts: Default::default(),
     };
     (ServerState::new(snap, sink.clone()), sink)
 }
@@ -237,6 +240,7 @@ async fn stopped_service_returns_503_and_hot_reload() {
         compiled,
         running: HashSet::new(),
         files_root: None,
+        call_counts: Default::default(),
     }));
     let (status, _, body) = call(
         &state,
@@ -292,6 +296,7 @@ async fn real_listeners_open_and_close() {
         compiled: CompiledWorkspace::compile(ws, vec![mifiel()]),
         running: HashSet::from(["mifiel".to_string()]),
         files_root: None,
+        call_counts: Default::default(),
     };
     let status = server.apply(snap(ws.clone())).await;
     assert_eq!(status.len(), 1);
@@ -318,6 +323,7 @@ async fn real_listeners_open_and_close() {
             compiled: CompiledWorkspace::compile(ws.clone(), vec![svc]),
             running: HashSet::new(),
             files_root: None,
+            call_counts: Default::default(),
         })
         .await;
     let own = status.iter().find(|s| s.service_id.is_some()).unwrap();

@@ -14,6 +14,7 @@ import PageHeader from '@/app/shared/components/PageHeader.vue'
 import RunToggle from '@/app/shared/components/RunToggle.vue'
 import RunningDot from '@/app/shared/components/RunningDot.vue'
 import WorkflowList from '@/app/modules/workflows/components/WorkflowList.vue'
+import ResourceBrowser from '@/app/modules/resources/components/ResourceBrowser.vue'
 import { HTTP_METHODS, type AuthConfig, type EndpointSummary, type HttpMethod, type Issue, type ServiceView } from '@/infrastructure/api/types.ts'
 
 const props = defineProps<{ sid: string }>()
@@ -23,9 +24,11 @@ const { t } = useI18n()
 
 const view = ref<ServiceView | null>(null)
 const endpoints = ref<EndpointSummary[]>([])
-const tab = ref<'endpoints' | 'workflows' | 'config'>(
-  route.query.tab === 'workflows' || route.query.tab === 'config' ? route.query.tab : 'endpoints',
+type Tab = 'endpoints' | 'workflows' | 'resources' | 'config'
+const tab = ref<Tab>(
+  ['workflows', 'resources', 'config'].includes(String(route.query.tab)) ? (route.query.tab as Tab) : 'endpoints',
 )
+const resourceCount = ref<number | null>(null)
 const workflowCount = ref(0)
 const notFound = ref(false)
 
@@ -259,6 +262,7 @@ async function remove() {
       <VTabs v-model="tab" class="mb-4">
         <VTab value="endpoints">Endpoints ({{ endpoints.length }})</VTab>
         <VTab value="workflows">Workflows ({{ workflowCount }})</VTab>
+        <VTab value="resources">Recursos<template v-if="resourceCount !== null"> ({{ resourceCount }})</template></VTab>
         <VTab value="config">
           Configuración
           <VBadge v-if="dirty" dot color="primary" inline />
@@ -313,6 +317,10 @@ async function remove() {
 
         <VWindowItem value="workflows">
           <WorkflowList :sid="sid" @count="workflowCount = $event" />
+        </VWindowItem>
+
+        <VWindowItem value="resources">
+          <ResourceBrowser v-if="tab === 'resources'" :sid="sid" @count="resourceCount = $event" />
         </VWindowItem>
 
         <VWindowItem value="config">

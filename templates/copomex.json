@@ -1,0 +1,201 @@
+{
+  "format": "fake-services",
+  "formatVersion": 1,
+  "services": [
+    {
+      "schemaVersion": 1,
+      "id": "copomex",
+      "name": "COPOMEX",
+      "description": "Códigos postales de México. Responde con colonias generadas; el token «pruebas» o cualquier token no vacío funciona. Sin token responde el error 4 de COPOMEX.",
+      "upstreamUrl": "https://api.copomex.com",
+      "prefix": "/copomex",
+      "endpoints": [
+        {
+          "id": "get-query-info-cp",
+          "name": "Información de un CP",
+          "method": "GET",
+          "path": "/query/info_cp/{cp}",
+          "scenarios": [
+            {
+              "id": "sin-token",
+              "name": "Token faltante",
+              "rules": [
+                {
+                  "source": "query",
+                  "key": "token",
+                  "operator": "notExists"
+                }
+              ],
+              "response": {
+                "status": 400,
+                "body": {
+                  "type": "json",
+                  "content": {
+                    "error": true,
+                    "code_error": 4,
+                    "error_message": "Token no válido"
+                  }
+                }
+              }
+            },
+            {
+              "id": "cp-invalido",
+              "name": "CP inválido",
+              "rules": [
+                {
+                  "source": "path",
+                  "key": "cp",
+                  "operator": "regex",
+                  "value": "^(\\d{0,4}|\\d{6,}|.*\\D.*)$"
+                }
+              ],
+              "response": {
+                "status": 400,
+                "body": {
+                  "type": "json",
+                  "content": {
+                    "error": true,
+                    "code_error": 2,
+                    "error_message": "Código Postal no válido"
+                  }
+                }
+              }
+            },
+            {
+              "id": "ok",
+              "name": "Colonias",
+              "rules": [],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": [
+                    {
+                      "error": false,
+                      "code_error": 0,
+                      "error_message": null,
+                      "response": {
+                        "cp": "{{ request.params.cp }}",
+                        "asentamiento": "Centro",
+                        "tipo_asentamiento": "Colonia",
+                        "municipio": "Cuauhtémoc",
+                        "estado": "Ciudad de México",
+                        "ciudad": "Ciudad de México",
+                        "pais": "México"
+                      }
+                    },
+                    {
+                      "error": false,
+                      "code_error": 0,
+                      "error_message": null,
+                      "response": {
+                        "cp": "{{ request.params.cp }}",
+                        "asentamiento": "Guerrero",
+                        "tipo_asentamiento": "Colonia",
+                        "municipio": "Cuauhtémoc",
+                        "estado": "Ciudad de México",
+                        "ciudad": "Ciudad de México",
+                        "pais": "México"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-query-get-estados",
+          "name": "Estados",
+          "method": "GET",
+          "path": "/query/get_estados",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Estados",
+              "rules": [],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": {
+                    "error": false,
+                    "code_error": 0,
+                    "error_message": null,
+                    "response": {
+                      "estado": [
+                        "Aguascalientes",
+                        "Baja California",
+                        "Baja California Sur",
+                        "Campeche",
+                        "Chiapas",
+                        "Chihuahua",
+                        "Ciudad de México",
+                        "Coahuila de Zaragoza",
+                        "Colima",
+                        "Durango",
+                        "Estado de México",
+                        "Guanajuato",
+                        "Guerrero",
+                        "Hidalgo",
+                        "Jalisco",
+                        "Michoacán de Ocampo",
+                        "Morelos",
+                        "Nayarit",
+                        "Nuevo León",
+                        "Oaxaca",
+                        "Puebla",
+                        "Querétaro",
+                        "Quintana Roo",
+                        "San Luis Potosí",
+                        "Sinaloa",
+                        "Sonora",
+                        "Tabasco",
+                        "Tamaulipas",
+                        "Tlaxcala",
+                        "Veracruz de Ignacio de la Llave",
+                        "Yucatán",
+                        "Zacatecas"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-query-get-municipio-por-estado",
+          "name": "Municipios de un estado",
+          "method": "GET",
+          "path": "/query/get_municipio_por_estado/{estado}",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Municipios",
+              "rules": [],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": {
+                    "error": false,
+                    "code_error": 0,
+                    "error_message": null,
+                    "response": {
+                      "municipios": [
+                        "Municipio {{ random_int(1, 99) }}",
+                        "Municipio {{ random_int(100, 199) }}",
+                        "Municipio {{ random_int(200, 299) }}"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -15,6 +15,7 @@ import ResponseEditor from '../components/ResponseEditor.vue'
 import RuleEditor from '../components/RuleEditor.vue'
 import TryRequest from '../components/TryRequest.vue'
 import WorkflowLinksEditor from '../components/WorkflowLinksEditor.vue'
+import ScenarioAdvanced from '@/app/modules/endpoints/components/ScenarioAdvanced.vue'
 import { HTTP_METHODS, type BodyKind, type Endpoint, type Issue, type Scenario } from '@/infrastructure/api/types.ts'
 
 const props = defineProps<{ sid: string; eid: string }>()
@@ -332,6 +333,8 @@ function onKey(e: KeyboardEvent) {
                     {{ s.workflows.length }} workflow{{ s.workflows.length === 1 ? '' : 's' }}
                   </VChip>
                   <VChip v-if="ep.activeScenario && ep.activeScenario === s.id" size="x-small" color="warning">forzado</VChip>
+                  <VChip v-if="s.probability != null" size="x-small" variant="tonal">{{ Math.round(s.probability * 100) }}%</VChip>
+                  <VChip v-if="s.resource" size="x-small" variant="tonal" prepend-icon="mdi-database-outline">{{ s.resource.operation }} {{ s.resource.collection }}</VChip>
                   <VIcon v-if="scenarioIssues(i).length" icon="mdi-alert-circle-outline" color="error" size="small" />
                   <VSpacer />
                   <div class="d-flex align-center" @click.stop>
@@ -357,6 +360,10 @@ function onKey(e: KeyboardEvent) {
                   </VCol>
                   <VCol cols="12" xl="6">
                     <ResponseEditor v-model="s.response" />
+                  </VCol>
+                  <VCol cols="12">
+                    <div class="text-label-medium text-medium-emphasis mb-2">Avanzado</div>
+                    <ScenarioAdvanced v-model="ep.scenarios[i]!" />
                   </VCol>
                   <VCol cols="12">
                     <div class="text-label-medium text-medium-emphasis mb-2">Workflows que inicia</div>

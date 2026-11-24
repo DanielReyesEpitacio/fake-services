@@ -424,6 +424,50 @@ pub struct Scenario {
     /// Workflows que inicia este escenario.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub workflows: Vec<crate::workflow::WorkflowLink>,
+    /// Probabilidad (0-1] de usar este escenario cuando sus reglas se cumplen.
+    /// Sirve para fallas intermitentes: `0.1` = uno de cada diez.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probability: Option<f64>,
+    /// Operación sobre un recurso simulado persistente antes de responder.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resource: Option<ResourceAction>,
+}
+
+/// Operación sobre recursos simulados (colecciones persistentes por servicio).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ResourceOp {
+    /// Guarda un registro nuevo (si existe, lo reemplaza). Sin `id`, se genera.
+    Create,
+    /// Combina `data` con el registro existente o lo crea.
+    Upsert,
+    /// Combina `data` con el registro existente; si no existe → `onMissing`.
+    Update,
+    /// Lee un registro; si no existe → `onMissing`.
+    Get,
+    /// Borra un registro; si no existe → `onMissing`.
+    Delete,
+    /// Lista los registros de la colección.
+    List,
+}
+
+/// Acción sobre un recurso. El resultado queda en `{{ resource }}` (un
+/// registro) o `{{ resources }}` (lista) para la respuesta.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceAction {
+    /// Colección (p. ej. `documents`, `objects`, `customers`).
+    pub collection: String,
+    pub operation: ResourceOp,
+    /// Identificador del registro (plantilla, p. ej. `{{ request.params.id }}`).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub record_id: String,
+    /// Datos a guardar o combinar (los textos son plantillas).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
+    /// Respuesta si el registro no existe (por defecto, 404 JSON).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_missing: Option<ResponseDef>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema, Default)]
@@ -453,6 +497,8 @@ pub enum RuleSource {
     Method,
     /// Variable del espacio/servicio.
     Variable,
+    /// Número de la llamada a este endpoint (1, 2, 3...) desde el último cambio de configuración.
+    CallCount,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

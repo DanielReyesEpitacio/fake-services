@@ -80,7 +80,7 @@ export interface RequestSpec {
   body?: BodySpec | null
 }
 
-export type RuleSource = 'header' | 'query' | 'path' | 'body' | 'method' | 'variable'
+export type RuleSource = 'header' | 'query' | 'path' | 'body' | 'method' | 'variable' | 'callCount'
 export type Operator =
   | 'equals'
   | 'notEquals'
@@ -123,6 +123,20 @@ export interface Scenario {
   rules?: Rule[]
   response: ResponseDef
   workflows?: WorkflowLink[]
+  /** Probabilidad (0, 1] de que el escenario aplique cuando sus reglas se cumplen. */
+  probability?: number | null
+  /** Operación sobre un recurso persistente antes de responder. */
+  resource?: ResourceAction | null
+}
+
+export type ResourceOp = 'create' | 'upsert' | 'update' | 'get' | 'delete' | 'list'
+
+export interface ResourceAction {
+  collection: string
+  operation: ResourceOp
+  recordId?: string
+  data?: unknown
+  onMissing?: ResponseDef | null
 }
 
 export interface Endpoint {
@@ -346,6 +360,14 @@ export type Step = StepBase &
         onFalse?: string | null
       }
     | { type: 'runWorkflow'; workflowId: string; input?: Record<string, unknown>; wait?: boolean }
+    | {
+        type: 'resource'
+        collection: string
+        operation: ResourceOp
+        recordId?: string
+        data?: unknown
+        failIfMissing?: boolean
+      }
     | { type: 'fail'; message: string }
     | { type: 'end' }
   )
@@ -362,6 +384,8 @@ export interface Workflow {
   schedule?: { everyMs: number } | null
   steps: Step[]
   maxSteps?: number
+  /** Posiciones de los pasos en el editor visual. */
+  layout?: Record<string, { x: number; y: number }>
 }
 
 export interface WorkflowUsage {
@@ -452,9 +476,64 @@ export interface ImportReport {
   skipped: string[]
   renamed: { from: string; to: string }[]
   files: number
+  resources?: number
   endpoints: number
   workflows: number
   warnings: string[]
+}
+
+export interface SpecImportReport extends ImportReport {
+  format: 'openapi' | 'postman'
+  serviceId: string
+}
+
+export interface TemplateInfo {
+  id: string
+  name: string
+  description: string
+  category: string
+  tags: string[]
+  upstreamUrl?: string | null
+  prefix: string
+  endpoints: number
+  workflows: number
+  installed: boolean
+}
+
+export interface TemplateInstallReport extends ImportReport {
+  templateId: string
+  serviceId: string
+}
+
+export interface CollectionInfo {
+  collection: string
+  count: number
+  updatedMs: number
+}
+
+export interface ResourceRecord {
+  id: string
+  data: Record<string, unknown>
+  createdMs: number
+  updatedMs: number
+}
+
+export interface DetectedIntegration {
+  providerId: string
+  name: string
+  template?: string | null
+  confidence: string
+  baseUrls: string[]
+  occurrences: number
+  evidence: { file: string; line: number; kind: string; snippet: string }[]
+}
+
+export interface DetectionReport {
+  root: string
+  filesScanned: number
+  truncated: boolean
+  integrations: DetectedIntegration[]
+  otherHosts: { host: string; occurrences: number; files: string[] }[]
 }
 
 export interface AutostartStatus {

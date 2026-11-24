@@ -250,6 +250,26 @@ pub fn validate_endpoint(ep: &Endpoint, siblings: &[&Endpoint]) -> Vec<Issue> {
             validate_rule(&mut issues, &format!("{base}.rules[{j}]"), rule);
         }
         validate_response(&mut issues, &format!("{base}.response"), &sc.response);
+        if let Some(p) = sc.probability
+            && !(p > 0.0 && p <= 1.0)
+        {
+            issues.push(Issue::new(
+                format!("{base}.probability"),
+                "la probabilidad debe estar entre 0 (excluido) y 1",
+            ));
+        }
+        if let Some(r) = &sc.resource {
+            validate_resource(
+                &mut issues,
+                &format!("{base}.resource"),
+                &r.collection,
+                r.operation,
+                &r.record_id,
+            );
+            if let Some(m) = &r.on_missing {
+                validate_response(&mut issues, &format!("{base}.resource.onMissing"), m);
+            }
+        }
     }
     if let Some(active) = &ep.active_scenario
         && !ep.scenarios.iter().any(|s| &s.id == active)
@@ -263,6 +283,36 @@ pub fn validate_endpoint(ep: &Endpoint, siblings: &[&Endpoint]) -> Vec<Issue> {
         validate_response(&mut issues, "onValidationError", r);
     }
     issues
+}
+
+/// Valida una operación sobre recursos.
+pub fn validate_resource(
+    issues: &mut Vec<Issue>,
+    base: &str,
+    collection: &str,
+    op: ResourceOp,
+    id: &str,
+) {
+    if collection.trim().is_empty()
+        || !collection
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
+        issues.push(Issue::new(
+            format!("{base}.collection"),
+            "colección inválida: letras, números, '-', '_' o '.'",
+        ));
+    }
+    let needs_id = matches!(
+        op,
+        ResourceOp::Get | ResourceOp::Update | ResourceOp::Delete | ResourceOp::Upsert
+    );
+    if needs_id && id.trim().is_empty() {
+        issues.push(Issue::new(
+            format!("{base}.recordId"),
+            "esta operación necesita el id del registro",
+        ));
+    }
 }
 
 fn validate_params(issues: &mut Vec<Issue>, base: &str, params: &[ParamSpec], header: bool) {
@@ -299,7 +349,10 @@ fn validate_params(issues: &mut Vec<Issue>, base: &str, params: &[ParamSpec], he
 }
 
 fn validate_rule(issues: &mut Vec<Issue>, base: &str, rule: &Rule) {
-    let needs_key = !matches!(rule.source, RuleSource::Body | RuleSource::Method);
+    let needs_key = !matches!(
+        rule.source,
+        RuleSource::Body | RuleSource::Method | RuleSource::CallCount
+    );
     if needs_key && rule.key.trim().is_empty() {
         issues.push(Issue::new(
             format!("{base}.key"),
@@ -365,9 +418,11 @@ pub fn validate_response(issues: &mut Vec<Issue>, base: &str, r: &ResponseDef) {
     }
     match &r.body {
         ResponseBody::Binary { base64, .. } => {
-            if base64
-                .chars()
-                .any(|c| !(c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | '\n' | '\r')))
+            // Con `{{ }}` es una plantilla (p. ej. `{{ resource.body }}`): se valida al responder.
+            if !base64.contains("{{")
+                && base64.chars().any(|c| {
+                    !(c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | '\n' | '\r'))
+                })
             {
                 issues.push(Issue::new(format!("{base}.body.base64"), "base64 inválido"));
             }
@@ -409,6 +464,8 @@ mod tests {
                 enabled: true,
                 rule_mode: RuleMode::All,
                 workflows: vec![],
+                probability: None,
+                resource: None,
                 rules: vec![],
                 response: ResponseDef::json(200, json!({})),
             }],
@@ -696,6 +753,14 @@ pub fn validate_workflow(
                         "un workflow no puede ejecutarse a sí mismo; usa un salto",
                     ));
                 }
+            }
+            Action::Resource {
+                collection,
+                operation,
+                record_id,
+                ..
+            } => {
+                validate_resource(&mut issues, &base, collection, *operation, record_id);
             }
             Action::Fail { message } => {
                 if message.trim().is_empty() {

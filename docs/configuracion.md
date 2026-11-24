@@ -130,8 +130,10 @@ El esquema JSON de cada documento se puede consultar en
 3. Se verifica la autenticación del servicio (`401`).
 4. Se valida la solicitud contra `request` (`422` u `onValidationError`).
 5. Se elige el escenario: header `x-fakes-scenario` → `activeScenario` → primer escenario
-   habilitado cuyas reglas se cumplen. Si ninguno aplica, responde `501`.
-6. Se renderiza la respuesta, se aplica el retraso y se guarda en el historial.
+   habilitado cuyas reglas se cumplen (y que pasa su `probability`, si tiene). Si ninguno aplica,
+   responde `501`.
+6. Si el escenario tiene `resource`, se aplica la operación sobre el recurso persistente.
+7. Se renderiza la respuesta, se aplica el retraso y se guarda en el historial.
 
 Todas las respuestas de error generadas por el simulador tienen la forma
 `{"error": "...", "message": "...", "source": "fake-services"}` para distinguirlas de las
@@ -147,18 +149,69 @@ respuestas configuradas.
 | `body` | Ruta con puntos (`user.items.0.id`). Vacía = body completo. |
 | `method` | — |
 | `variable` | Nombre de la variable del espacio/servicio. |
+| `callCount` | — Número de la llamada a este endpoint (1, 2, 3…), desde el último cambio de configuración. |
 
 Operadores: `equals`, `notEquals`, `contains`, `notContains`, `exists`, `notExists`,
 `greaterThan`, `lessThan`, `regex`. Las comparaciones son tolerantes (`"5"` es igual a `5`).
 `ruleMode` puede ser `all` (por defecto) o `any`.
 
+Ejemplo: fallar las dos primeras llamadas y responder bien después (reintentos):
+
+```json
+{ "name": "Falla al inicio", "rules": [{ "source": "callCount", "operator": "lessThan", "value": 3 }],
+  "response": { "status": 503 } }
+```
+
+### Probabilidad
+
+`probability` (entre 0 y 1) hace que un escenario aplique solo una parte de las veces cuando sus
+reglas se cumplen; si no aplica, se evalúa el siguiente. Sirve para fallas intermitentes:
+
+```json
+{ "name": "Timeout ocasional", "probability": 0.1, "response": { "status": 504, "delayMs": 5000 } }
+```
+
+### Recursos persistentes
+
+Un escenario puede leer o modificar un registro de una colección del servicio antes de
+responder. Así un `POST` crea algo que un `GET` posterior devuelve:
+
+```json
+{ "name": "Crear documento",
+  "resource": { "collection": "documents", "operation": "create", "recordId": "{{ uuid() }}",
+                "data": { "file_name": "{{ request.body.file_name }}", "status": "pending" } },
+  "response": { "status": 201, "body": { "type": "json", "content": "{{ resource }}" } } }
+```
+
+```json
+{ "name": "Consultar documento",
+  "resource": { "collection": "documents", "operation": "get", "recordId": "{{ request.params.id }}",
+                "onMissing": { "status": 404, "body": { "type": "json", "content": { "error": "not found" } } } },
+  "response": { "status": 200, "body": { "type": "json", "content": "{{ resource }}" } } }
+```
+
+| `operation` | Qué hace | En la respuesta |
+|---|---|---|
+| `create` | Guarda un registro. `recordId` vacío = `data.id` o un id generado. | `resource` |
+| `get` | Lee el registro. | `resource` |
+| `update` | Combina `data` con el existente (nivel superior; `null` borra un campo). | `resource` |
+| `upsert` | Como `update`, pero crea si no existe. | `resource` |
+| `delete` | Borra el registro. | `resource` (lo borrado) |
+| `list` | Todos los registros de la colección (máx. 1000). | `resources` |
+
+`recordId` y los textos de `data` son plantillas. Si el registro no existe (`get`, `update`,
+`delete`), se responde `onMissing` o, por defecto, `404` con
+`{"error": "not_found", "source": "fake-services"}`. Cada registro incluye siempre su `id`.
+Los recursos viven en SQLite (estado de ejecución, no configuración): se ven y editan en la
+pestaña **Recursos** del servicio, por la API (`/services/{sid}/resources`) o por MCP, y se pueden
+incluir en una exportación.
 ### Bodies de respuesta
 
 | `type` | Campos |
 |---|---|
 | `json` | `content`: cualquier JSON; cada texto es plantilla. |
 | `text` | `content` (plantilla), `contentType` opcional (se detecta XML/HTML). |
-| `binary` | `base64`, `contentType`. |
+| `binary` | `base64` (admite plantillas, p. ej. `{{ resource.body }}`), `contentType`. |
 | `file` | `path` relativo a `files/` (admite plantillas), `contentType` opcional. |
 | `none` | Sin body. |
 
@@ -209,11 +262,15 @@ Un workflow pertenece a un servicio y se guarda en `services/<servicio>/workflow
 | `setVariables` | `values` | Asigna `vars.*`. |
 | `condition` | `conditions[]` (`path`, `operator`, `value`), `mode`, `onTrue`, `onFalse` | Salta según el resultado. |
 | `runWorkflow` | `workflowId`, `input`, `wait` | Inicia otro workflow del servicio (máx. 5 niveles). |
+| `resource` | `collection`, `operation`, `recordId`, `data`, `failIfMissing` | Lee o modifica un recurso persistente (mismas operaciones que en los escenarios). El resultado queda en `steps.<id>.resource` (o `resources`) y `steps.<id>.found`. |
 | `fail` | `message` | Termina la ejecución como fallida. |
 | `end` | — | Termina la ejecución como completada. |
 
 Cualquier paso acepta `next` para saltar a otro paso (`end` termina). Los bucles están permitidos
 y se cortan con `maxSteps`.
+
+El campo opcional `layout` (`{ "<id de paso>": { "x": 0, "y": 120 } }`) guarda las posiciones del
+editor visual; no afecta la ejecución.
 
 Los `expectedStatus` aceptan `200`, `2xx` o `200-299`; vacío equivale a `2xx`. Los errores de red y
 los códigos inesperados se reintentan con espera exponencial; un destino bloqueado por la
@@ -277,6 +334,9 @@ límite de ejecución). Los datos faltantes se resuelven como vacíos.
 | `request.headers['x-name']` | Headers en minúsculas. |
 | `request.body` | Body interpretado (JSON, formulario, multipart o texto). |
 | `request.rawBody`, `request.ip`, `request.contentType` | Body original, IP y Content-Type. |
+| `request.rawBodyBase64` | Body original en base64 (para guardar binarios). |
+| `request.callNumber` | Número de la llamada a este endpoint. |
+| `resource` / `resources` | Registro o lista del recurso del escenario. |
 | `vars.X` | Variables del espacio y del servicio. |
 | `service.id`, `service.name`, `service.url` | Datos del servicio. |
 | `endpoint.id`, `scenario.id`, `workspace.id` | Identificadores. |

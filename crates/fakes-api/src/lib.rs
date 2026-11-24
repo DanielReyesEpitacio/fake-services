@@ -48,15 +48,70 @@ pub fn build_router(app: Arc<FakesApp>, token: String, port: u16) -> Router {
         token: Arc::new(token.clone()),
         allowed_hosts: Arc::new(allowed_hosts(port)),
     };
+    let mcp = fakes_mcp::McpServer::new(app.clone());
     let api = routes::router()
         .with_state(app)
         .layer(middleware::from_fn_with_state(guard.clone(), require_token));
+    let mcp_routes = Router::new()
+        .route(
+            "/mcp",
+            axum::routing::post(mcp_post)
+                .get(mcp_get)
+                .delete(mcp_delete),
+        )
+        .with_state(mcp)
+        .layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024))
+        .layer(middleware::from_fn_with_state(guard.clone(), require_token));
     Router::new()
         .nest("/api/v1", api)
+        .merge(mcp_routes)
         .route("/healthz", axum::routing::get(|| async { "ok" }))
         .fallback(ui::serve_ui)
         .layer(axum::Extension(ui::UiToken(Arc::new(token))))
         .layer(middleware::from_fn_with_state(guard, check_host))
+}
+
+/// MCP por HTTP (transporte "streamable HTTP" con respuestas JSON).
+async fn mcp_post(
+    State(mcp): State<Arc<fakes_mcp::McpServer>>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let payload: serde_json::Value = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::Json(json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": format!("JSON inválido: {e}")}})),
+            )
+                .into_response();
+        }
+    };
+    let is_init = payload.get("method").and_then(|m| m.as_str()) == Some("initialize");
+    match mcp.handle_payload(payload).await {
+        Some(resp) => {
+            let mut r = axum::Json(resp).into_response();
+            let session = headers
+                .get("mcp-session-id")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string)
+                .or_else(|| is_init.then(|| format!("{:032x}", fastrand::u128(..))));
+            if let Some(s) = session.and_then(|s| axum::http::HeaderValue::from_str(&s).ok()) {
+                r.headers_mut().insert("mcp-session-id", s);
+            }
+            r
+        }
+        None => StatusCode::ACCEPTED.into_response(),
+    }
+}
+
+/// No hay flujo de eventos del servidor: las respuestas van en el POST.
+async fn mcp_get() -> Response {
+    (StatusCode::METHOD_NOT_ALLOWED, [(header::ALLOW, "POST")]).into_response()
+}
+
+async fn mcp_delete() -> StatusCode {
+    StatusCode::NO_CONTENT
 }
 
 fn allowed_hosts(port: u16) -> Vec<String> {

@@ -8,6 +8,8 @@ members = [
     "crates/fakes-store",
     "crates/fakes-server",
     "crates/fakes-workflow",
+    "crates/fakes-import",
+    "crates/fakes-mcp",
     "crates/fakes-app",
     "crates/fakes-api",
     "crates/fakes-cli",
@@ -28,6 +30,8 @@ fakes-response = { path = "crates/fakes-response" }
 fakes-store = { path = "crates/fakes-store" }
 fakes-server = { path = "crates/fakes-server" }
 fakes-workflow = { path = "crates/fakes-workflow" }
+fakes-import = { path = "crates/fakes-import" }
+fakes-mcp = { path = "crates/fakes-mcp" }
 fakes-app = { path = "crates/fakes-app" }
 fakes-api = { path = "crates/fakes-api" }
 

@@ -72,6 +72,15 @@ pub struct Workflow {
     /// Pasos máximos por ejecución; evita bucles infinitos.
     #[serde(default = "default_max_steps")]
     pub max_steps: u32,
+    /// Posición de cada paso en el editor visual (solo presentación).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub layout: BTreeMap<String, Position>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct Position {
+    pub x: f64,
+    pub y: f64,
 }
 
 fn default_max_steps() -> u32 {
@@ -148,6 +157,22 @@ pub enum Action {
         #[serde(default, skip_serializing_if = "is_false")]
         wait: bool,
     },
+    /// Leer o modificar un recurso simulado persistente del servicio.
+    #[serde(rename_all = "camelCase")]
+    Resource {
+        collection: String,
+        operation: crate::model::ResourceOp,
+        /// Identificador del registro (plantilla). Se llama `recordId` para no
+        /// chocar con el `id` del paso.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        record_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        data: Option<Value>,
+        /// Fallar la ejecución si el registro no existe (por defecto se continúa
+        /// y `steps.<id>.found` es `false`).
+        #[serde(default, skip_serializing_if = "is_false")]
+        fail_if_missing: bool,
+    },
     /// Simular un error: la ejecución termina como fallida.
     #[serde(rename_all = "camelCase")]
     Fail { message: String },
@@ -164,6 +189,7 @@ impl Action {
             Action::SetVariables { .. } => "setVariables",
             Action::Condition { .. } => "condition",
             Action::RunWorkflow { .. } => "runWorkflow",
+            Action::Resource { .. } => "resource",
             Action::Fail { .. } => "fail",
             Action::End => "end",
         }

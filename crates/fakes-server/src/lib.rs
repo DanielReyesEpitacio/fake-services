@@ -86,6 +86,21 @@ pub struct Snapshot {
     pub running: HashSet<String>,
     /// Carpeta `files/` del espacio para respuestas de tipo archivo.
     pub files_root: Option<PathBuf>,
+    /// Llamadas por endpoint desde que se publicó esta configuración.
+    pub call_counts: CallCounts,
+}
+
+/// Contador de llamadas por endpoint (para reglas de número de llamada).
+#[derive(Default)]
+pub struct CallCounts(Mutex<std::collections::HashMap<String, u64>>);
+
+impl CallCounts {
+    pub fn next(&self, key: &str) -> u64 {
+        let mut m = self.0.lock().unwrap();
+        let n = m.entry(key.to_string()).or_insert(0);
+        *n += 1;
+        *n
+    }
 }
 
 impl Snapshot {
@@ -113,6 +128,8 @@ pub struct ServerState {
     pub snapshot: ArcSwap<Snapshot>,
     pub sink: Arc<dyn RequestSink>,
     pub workflows: Arc<dyn WorkflowStarter>,
+    /// Almacén de recursos simulados persistentes.
+    pub store: Option<fakes_store::Store>,
 }
 
 impl ServerState {
@@ -129,6 +146,22 @@ impl ServerState {
             snapshot: ArcSwap::from_pointee(snapshot),
             sink,
             workflows,
+            store: None,
+        })
+    }
+
+    /// Estado completo: workflows y recursos persistentes.
+    pub fn full(
+        snapshot: Snapshot,
+        sink: Arc<dyn RequestSink>,
+        workflows: Arc<dyn WorkflowStarter>,
+        store: fakes_store::Store,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            snapshot: ArcSwap::from_pointee(snapshot),
+            sink,
+            workflows,
+            store: Some(store),
         })
     }
 }

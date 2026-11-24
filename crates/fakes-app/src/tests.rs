@@ -463,6 +463,7 @@ async fn export_and_import_bundles() {
             services: vec![],
             include_workspace: true,
             include_files: true,
+            include_resources: true,
         })
         .await
         .unwrap();
@@ -570,4 +571,473 @@ async fn export_and_import_bundles() {
     assert_eq!(b.status().await.unwrap().workspace_name, "Copia de A");
     assert_eq!(b.list_workspaces().await.len(), 2);
     b.shutdown().await;
+}
+
+async fn send(
+    app: &FakesApp,
+    method: &str,
+    path: &str,
+    headers: &str,
+    body: &[u8],
+) -> (u16, String, Vec<u8>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let addr = app.server().central_addr().await.unwrap();
+    let mut s = tokio::net::TcpStream::connect(addr).await.unwrap();
+    let head = format!(
+        "{method} {path} HTTP/1.1\r\nHost: x\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    );
+    s.write_all(head.as_bytes()).await.unwrap();
+    s.write_all(body).await.unwrap();
+    let mut out = Vec::new();
+    s.read_to_end(&mut out).await.unwrap();
+    let split = out.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+    let head = String::from_utf8_lossy(&out[..split]).to_string();
+    let status = head[9..12].parse().unwrap();
+    (status, head, out[split + 4..].to_vec())
+}
+
+fn json_body(b: &[u8]) -> Value {
+    serde_json::from_slice(b).unwrap_or_else(|_| panic!("{}", String::from_utf8_lossy(b)))
+}
+
+#[tokio::test]
+async fn templates_install_and_persistent_resources() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path()).await;
+    let list = app.list_templates().await;
+    assert!(list.iter().any(|t| t.id == "mifiel" && !t.installed));
+    let r = app
+        .install_template("mifiel", Default::default())
+        .await
+        .unwrap();
+    assert_eq!(r.service_id, "mifiel");
+    assert!(app.get_service("mifiel").await.unwrap().running);
+    assert!(
+        app.list_templates()
+            .await
+            .iter()
+            .any(|t| t.id == "mifiel" && t.installed)
+    );
+
+    let json_h = "Content-Type: application/json\r\n";
+    let (st, _, b) = send(
+        &app,
+        "POST",
+        "/mifiel/documents",
+        json_h,
+        br#"{"file_name":"contrato.pdf"}"#,
+    )
+    .await;
+    assert_eq!(st, 200, "{}", String::from_utf8_lossy(&b));
+    let doc = json_body(&b);
+    let id = doc["id"].as_str().unwrap().to_string();
+    assert_eq!(doc["file_name"], "contrato.pdf");
+    assert_eq!(doc["signed"], false);
+
+    let (st, _, b) = send(&app, "GET", &format!("/mifiel/documents/{id}"), "", b"").await;
+    assert_eq!(st, 200);
+    assert_eq!(json_body(&b)["file_name"], "contrato.pdf");
+    let (st, _, b) = send(&app, "GET", "/mifiel/documents", "", b"").await;
+    assert_eq!(st, 200);
+    assert_eq!(json_body(&b).as_array().unwrap().len(), 1);
+    let (st, _, b) = send(&app, "GET", "/mifiel/documents/nope", "", b"").await;
+    assert_eq!(st, 404);
+    assert_eq!(json_body(&b)["status"], "error");
+
+    // Casos de uso de recursos
+    let cols = app.list_resource_collections("mifiel").await.unwrap();
+    assert_eq!(
+        (cols[0].collection.as_str(), cols[0].count),
+        ("documents", 1)
+    );
+    let rec = app
+        .put_resource("mifiel", "documents", "manual", json!({"state": "signed"}))
+        .await
+        .unwrap();
+    assert_eq!(rec.data, json!({"state": "signed", "id": "manual"}));
+    assert_eq!(
+        app.list_resources("mifiel", "documents", None, None)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
+    assert!(matches!(
+        app.put_resource("mifiel", "mal nombre", "x", json!({}))
+            .await,
+        Err(AppError::BadRequest(_))
+    ));
+
+    // Exportar e importar con recursos
+    let bundle = app
+        .export_bundle(&ExportOptions {
+            services: vec!["mifiel".into()],
+            include_resources: true,
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(bundle.resources["mifiel"]["documents"].len(), 2);
+    let (st, _, _) = send(&app, "DELETE", &format!("/mifiel/documents/{id}"), "", b"").await;
+    assert_eq!(st, 200);
+    let (st, _, _) = send(&app, "DELETE", &format!("/mifiel/documents/{id}"), "", b"").await;
+    assert_eq!(st, 404);
+    assert_eq!(app.clear_resources("mifiel", None).await.unwrap(), 1);
+
+    // Instalar otra vez renombra; reemplazar conserva el id
+    let r2 = app
+        .install_template("mifiel", Default::default())
+        .await
+        .unwrap();
+    assert_ne!(r2.service_id, "mifiel");
+    app.delete_service(&r2.service_id).await.unwrap();
+
+    // S3: objetos binarios reales
+    app.install_template("aws-s3", Default::default())
+        .await
+        .unwrap();
+    let data: Vec<u8> = (0u8..=255).collect();
+    let (st, head, b) = send(
+        &app,
+        "PUT",
+        "/s3/fotos/2026/a.bin",
+        "Content-Type: image/png\r\n",
+        &data,
+    )
+    .await;
+    assert_eq!(st, 200, "{}", String::from_utf8_lossy(&b));
+    assert!(head.to_lowercase().contains("etag:"), "{head}");
+    let (st, head, b) = send(&app, "GET", "/s3/fotos/2026/a.bin", "", b"").await;
+    assert_eq!(st, 200);
+    assert!(
+        head.to_lowercase().contains("content-type: image/png"),
+        "{head}"
+    );
+    assert_eq!(b, data);
+    let (st, _, b) = send(&app, "GET", "/s3/fotos?prefix=2026/", "", b"").await;
+    assert_eq!(st, 200, "{}", String::from_utf8_lossy(&b));
+    let xml = String::from_utf8_lossy(&b);
+    assert!(
+        xml.contains("<Key>2026/a.bin</Key>") && xml.contains("<KeyCount>1</KeyCount>"),
+        "{xml}"
+    );
+    let (st, _, b) = send(&app, "GET", "/s3/fotos/otro.txt", "", b"").await;
+    assert_eq!(st, 404);
+    assert!(String::from_utf8_lossy(&b).contains("NoSuchKey"));
+    // Con '/' en el id del recurso
+    assert_eq!(
+        app.get_resource("aws-s3", "objects", "fotos/2026/a.bin")
+            .await
+            .unwrap()
+            .data["size"],
+        256
+    );
+
+    // Borrar el servicio borra sus recursos
+    app.delete_service("aws-s3").await.unwrap();
+    app.install_template("aws-s3", Default::default())
+        .await
+        .unwrap();
+    assert!(
+        app.list_resource_collections("aws-s3")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn all_templates_install_and_answer() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path()).await;
+    for t in app.list_templates().await {
+        let r = app
+            .install_template(&t.id, Default::default())
+            .await
+            .unwrap();
+        assert!(
+            r.report.created.len() + r.report.renamed.len() == 1,
+            "{}",
+            t.id
+        );
+    }
+    let auth =
+        "Authorization: Bearer sk_test\r\nContent-Type: application/x-www-form-urlencoded\r\n";
+    // Stripe: form-urlencoded, recursos y tarjeta rechazada
+    let (st, _, b) = send(
+        &app,
+        "POST",
+        "/stripe/v1/payment_intents",
+        auth,
+        b"amount=2000&currency=mxn",
+    )
+    .await;
+    assert_eq!(st, 200, "{}", String::from_utf8_lossy(&b));
+    let pi = json_body(&b);
+    assert_eq!(pi["amount"], 2000);
+    assert_eq!(pi["status"], "requires_confirmation");
+    let pid = pi["id"].as_str().unwrap();
+    let (st, _, b) = send(
+        &app,
+        "POST",
+        &format!("/stripe/v1/payment_intents/{pid}/confirm"),
+        auth,
+        b"payment_method=pm_card_chargeDeclined",
+    )
+    .await;
+    assert_eq!(st, 402, "{}", String::from_utf8_lossy(&b));
+    let (st, _, b) = send(
+        &app,
+        "POST",
+        &format!("/stripe/v1/payment_intents/{pid}/confirm"),
+        auth,
+        b"payment_method=pm_card_visa",
+    )
+    .await;
+    assert_eq!(st, 200);
+    assert_eq!(json_body(&b)["status"], "succeeded");
+    let (st, _, _) = send(
+        &app,
+        "POST",
+        "/stripe/v1/payment_intents",
+        auth,
+        b"currency=mxn",
+    )
+    .await;
+    assert_eq!(st, 400);
+    let (st, _, _) = send(&app, "GET", "/stripe/v1/customers", "", b"").await;
+    assert_eq!(st, 401);
+
+    // SendGrid
+    let sg = "Authorization: Bearer SG.x\r\nContent-Type: application/json\r\n";
+    let (st, head, _) = send(&app, "POST", "/sendgrid/v3/mail/send", sg, br#"{"personalizations":[{"to":[{"email":"a@b.c"}]}],"from":{"email":"x@y.z"},"subject":"Hola"}"#).await;
+    assert_eq!(st, 202);
+    assert!(head.to_lowercase().contains("x-message-id"));
+    let (st, _, _) = send(
+        &app,
+        "POST",
+        "/sendgrid/v3/mail/send",
+        sg,
+        br#"{"from":{"email":"x@y.z"}}"#,
+    )
+    .await;
+    assert_eq!(st, 400);
+
+    // Belvo
+    let bv = "Authorization: Basic aWQ6c2VjcmV0\r\nContent-Type: application/json\r\n";
+    let (st, _, b) = send(
+        &app,
+        "POST",
+        "/belvo/api/links/",
+        bv,
+        br#"{"institution":"erebor_mx_retail","username":"bnk100","password":"full"}"#,
+    )
+    .await;
+    assert_eq!(st, 201, "{}", String::from_utf8_lossy(&b));
+    let link = json_body(&b)["id"].as_str().unwrap().to_string();
+    let (st, _, b) = send(
+        &app,
+        "POST",
+        "/belvo/api/accounts/",
+        bv,
+        format!(r#"{{"link":"{link}"}}"#).as_bytes(),
+    )
+    .await;
+    assert_eq!(st, 201);
+    assert_eq!(json_body(&b).as_array().unwrap().len(), 2);
+    let (st, _, _) = send(
+        &app,
+        "POST",
+        "/belvo/api/accounts/",
+        bv,
+        br#"{"link":"nope"}"#,
+    )
+    .await;
+    assert_eq!(st, 400);
+    let (st, _, b) = send(&app, "GET", "/belvo/api/links/", bv, b"").await;
+    assert_eq!(st, 200);
+    assert_eq!(json_body(&b)["count"], 1);
+
+    // COPOMEX
+    let (st, _, b) = send(
+        &app,
+        "GET",
+        "/copomex/query/info_cp/06000?token=pruebas",
+        "",
+        b"",
+    )
+    .await;
+    assert_eq!(st, 200);
+    assert_eq!(json_body(&b)[0]["response"]["cp"], "06000");
+    let (st, _, _) = send(&app, "GET", "/copomex/query/info_cp/06000", "", b"").await;
+    assert_eq!(st, 400);
+    let (st, _, _) = send(&app, "GET", "/copomex/query/info_cp/abc?token=x", "", b"").await;
+    assert_eq!(st, 400);
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn mifiel_template_signs_document_and_sends_webhook() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path()).await;
+    app.install_template("mifiel", Default::default())
+        .await
+        .unwrap();
+    // Acelerar la espera del workflow para la prueba.
+    let mut wf = app
+        .get_workflow("mifiel", "procesar-firma")
+        .await
+        .unwrap()
+        .workflow;
+    for s in &mut wf.steps {
+        if let fakes_domain::Action::Wait { duration_ms } = &mut s.action {
+            *duration_ms = 50u64;
+        }
+    }
+    app.update_workflow("mifiel", "procesar-firma", wf)
+        .await
+        .unwrap();
+
+    let addr = app.server().central_addr().await.unwrap();
+    let callback = format!("http://{addr}/mifiel/webhook-receptor");
+    for (forced, state) in [
+        ("", "signed"),
+        ("x-fakes-scenario: rechazado\r\n", "rejected"),
+    ] {
+        let body = json!({"file_name": "c.pdf", "callback_url": callback}).to_string();
+        let (st, head, b) = send(
+            &app,
+            "POST",
+            "/mifiel/documents",
+            &format!("Content-Type: application/json\r\n{forced}"),
+            body.as_bytes(),
+        )
+        .await;
+        assert_eq!(st, 200);
+        let id = json_body(&b)["id"].as_str().unwrap().to_string();
+        let exec = head
+            .lines()
+            .find_map(|l| l.strip_prefix("x-fakes-executions: "))
+            .unwrap()
+            .trim()
+            .to_string();
+        let started = std::time::Instant::now();
+        let d = loop {
+            let d = app.get_execution(&exec).await.unwrap();
+            if d.execution.status.is_finished() {
+                break d;
+            }
+            assert!(started.elapsed() < Duration::from_secs(10));
+            tokio::time::sleep(Duration::from_millis(30)).await;
+        };
+        assert_eq!(
+            d.execution.status,
+            fakes_store::ExecutionStatus::Completed,
+            "{:?}",
+            d.execution.error
+        );
+        let rec = app.get_resource("mifiel", "documents", &id).await.unwrap();
+        assert_eq!(rec.data["state"], state);
+    }
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let hits = app
+        .list_requests(&RequestFilter {
+            search: Some("/mifiel/webhook-receptor".into()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(hits.len(), 2);
+    let last = app.get_request(&hits[0].id).await.unwrap();
+    assert_eq!(
+        serde_json::from_slice::<Value>(&last.request_body.bytes).unwrap()["state"],
+        "rejected"
+    );
+    app.shutdown().await;
+}
+
+#[tokio::test]
+async fn call_count_and_probability_scenarios() {
+    let tmp = tempfile::tempdir().unwrap();
+    let app = app(tmp.path()).await;
+    app.create_service(service_input("Avanzado")).await.unwrap();
+    app.create_endpoint(
+        "avanzado",
+        endpoint_input(json!({
+            "method": "GET", "path": "/reintento",
+            "scenarios": [
+                {"name": "Falla las dos primeras", "rules": [{"source": "callCount", "operator": "lessThan", "value": 3}],
+                 "response": {"status": 503, "body": {"type": "json", "content": {"n": "{{ request.callNumber }}"}}}},
+                {"name": "Siempre (probabilidad 1)", "probability": 1.0,
+                 "response": {"status": 200, "body": {"type": "json", "content": {"n": "{{ request.callNumber }}"}}}},
+                {"name": "Nunca alcanzado", "response": {"status": 500}}
+            ]
+        })),
+    )
+    .await
+    .unwrap();
+    let mut got = Vec::new();
+    for _ in 0..4 {
+        let (st, _, b) = send(&app, "GET", "/avanzado/reintento", "", b"").await;
+        got.push((st, json_body(&b)["n"].as_u64().unwrap()));
+    }
+    assert_eq!(got, vec![(503, 1), (503, 2), (200, 3), (200, 4)]);
+
+    // Probabilidad fuera de rango
+    let bad = endpoint_input(json!({"method": "GET", "path": "/p",
+        "scenarios": [{"name": "x", "probability": 0.0, "response": {"status": 200}}]}));
+    assert!(matches!(
+        app.create_endpoint("avanzado", bad).await,
+        Err(AppError::Validation(_))
+    ));
+
+    // Paso `resource` en un workflow manual
+    let wf: Workflow = serde_json::from_value(json!({
+        "name": "Saldo",
+        "steps": [
+            {"id": "crear", "type": "resource", "collection": "cuentas", "operation": "upsert", "recordId": "{{ input.cuenta }}", "data": {"saldo": "{{ input.saldo }}"}},
+            {"id": "leer", "type": "resource", "collection": "cuentas", "operation": "get", "recordId": "{{ input.cuenta }}"},
+            {"id": "falta", "type": "resource", "collection": "cuentas", "operation": "get", "recordId": "otra"},
+            {"id": "check", "type": "condition", "conditions": [{"path": "steps.leer.resource.saldo", "operator": "equals", "value": 150}], "onFalse": "error"},
+            {"id": "ok", "type": "end"},
+            {"id": "error", "type": "fail", "message": "saldo incorrecto"}
+        ]
+    }))
+    .unwrap();
+    app.create_workflow("avanzado", wf).await.unwrap();
+    let input = [
+        ("cuenta".to_string(), json!("c1")),
+        ("saldo".to_string(), json!(150)),
+    ]
+    .into_iter()
+    .collect();
+    let e = app
+        .run_workflow("avanzado", "saldo", input, None)
+        .await
+        .unwrap();
+    let started = std::time::Instant::now();
+    let d = loop {
+        let d = app.get_execution(&e.id).await.unwrap();
+        if d.execution.status.is_finished() {
+            break d;
+        }
+        assert!(started.elapsed() < Duration::from_secs(5));
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
+    assert_eq!(
+        d.execution.status,
+        fakes_store::ExecutionStatus::Completed,
+        "{:?}",
+        d.execution.error
+    );
+    assert_eq!(
+        app.get_resource("avanzado", "cuentas", "c1")
+            .await
+            .unwrap()
+            .data,
+        json!({"saldo": 150, "id": "c1"})
+    );
+    app.shutdown().await;
 }

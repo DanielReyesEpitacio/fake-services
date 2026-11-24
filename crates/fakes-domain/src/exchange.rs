@@ -24,6 +24,8 @@ pub struct IncomingRequest {
     /// Parámetros de ruta. Los llena el enrutador.
     pub params: BTreeMap<String, String>,
     pub remote_addr: Option<String>,
+    /// Número de la llamada a este endpoint (lo llena el servidor).
+    pub call_number: u64,
 }
 
 impl IncomingRequest {

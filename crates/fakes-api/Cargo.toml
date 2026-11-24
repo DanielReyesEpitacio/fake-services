@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 fakes-domain.workspace = true
 fakes-app.workspace = true
+fakes-mcp.workspace = true
 fakes-store.workspace = true
 axum.workspace = true
 tokio.workspace = true

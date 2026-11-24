@@ -1,0 +1,196 @@
+{
+  "format": "fake-services",
+  "formatVersion": 1,
+  "services": [
+    {
+      "schemaVersion": 1,
+      "id": "aws-s3",
+      "name": "AWS S3",
+      "description": "Almacenamiento de objetos con rutas estilo path (/<bucket>/<llave>). Los objetos se guardan de verdad (en base64) como recursos: PUT, GET, HEAD, DELETE y ListObjectsV2. Configura tu SDK con endpoint=<URL del servicio> y forcePathStyle=true; cualquier credencial sirve.",
+      "upstreamUrl": "https://s3.amazonaws.com",
+      "prefix": "/s3",
+      "endpoints": [
+        {
+          "id": "put-objeto",
+          "name": "Subir objeto (PutObject)",
+          "method": "PUT",
+          "path": "/{bucket}/{*key}",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Guardado",
+              "rules": [],
+              "resource": {
+                "collection": "objects",
+                "operation": "upsert",
+                "recordId": "{{ request.params.bucket }}/{{ request.params.key }}",
+                "data": {
+                  "bucket": "{{ request.params.bucket }}",
+                  "key": "{{ request.params.key }}",
+                  "body": "{{ request.rawBodyBase64 }}",
+                  "size": "{{ request.rawBody | length }}",
+                  "contentType": "{{ request.headers['content-type'] or 'application/octet-stream' }}",
+                  "etag": "{{ random_hex(32) }}",
+                  "lastModified": "{{ now('%a, %d %b %Y %H:%M:%S GMT') }}"
+                }
+              },
+              "response": {
+                "status": 200,
+                "headers": {
+                  "ETag": "\"{{ resource.etag }}\""
+                }
+              }
+            }
+          ],
+          "request": {
+            "body": {
+              "kind": "any",
+              "required": false
+            }
+          }
+        },
+        {
+          "id": "get-objeto",
+          "name": "Descargar objeto (GetObject)",
+          "method": "GET",
+          "path": "/{bucket}/{*key}",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Objeto",
+              "rules": [],
+              "resource": {
+                "collection": "objects",
+                "operation": "get",
+                "recordId": "{{ request.params.bucket }}/{{ request.params.key }}",
+                "onMissing": {
+                  "status": 404,
+                  "headers": {
+                    "Content-Type": "application/xml"
+                  },
+                  "body": {
+                    "type": "text",
+                    "contentType": "application/xml",
+                    "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message><Key>{{ request.params.key }}</Key><RequestId>{{ random_hex(16) | upper }}</RequestId></Error>"
+                  }
+                }
+              },
+              "response": {
+                "status": 200,
+                "headers": {
+                  "Content-Type": "{{ resource.contentType }}",
+                  "ETag": "\"{{ resource.etag }}\"",
+                  "Last-Modified": "{{ resource.lastModified }}"
+                },
+                "body": {
+                  "type": "binary",
+                  "base64": "{{ resource.body }}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "head-objeto",
+          "name": "Metadatos (HeadObject)",
+          "method": "HEAD",
+          "path": "/{bucket}/{*key}",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Existe",
+              "rules": [],
+              "resource": {
+                "collection": "objects",
+                "operation": "get",
+                "recordId": "{{ request.params.bucket }}/{{ request.params.key }}",
+                "onMissing": {
+                  "status": 404
+                }
+              },
+              "response": {
+                "status": 200,
+                "headers": {
+                  "Content-Type": "{{ resource.contentType }}",
+                  "Content-Length": "{{ resource.size }}",
+                  "ETag": "\"{{ resource.etag }}\""
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "delete-objeto",
+          "name": "Eliminar objeto (DeleteObject)",
+          "method": "DELETE",
+          "path": "/{bucket}/{*key}",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Eliminado",
+              "rules": [],
+              "resource": {
+                "collection": "objects",
+                "operation": "delete",
+                "recordId": "{{ request.params.bucket }}/{{ request.params.key }}",
+                "onMissing": {
+                  "status": 204
+                }
+              },
+              "response": {
+                "status": 204
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-bucket",
+          "name": "Listar objetos (ListObjectsV2)",
+          "method": "GET",
+          "path": "/{bucket}",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Lista",
+              "rules": [],
+              "resource": {
+                "collection": "objects",
+                "operation": "list"
+              },
+              "response": {
+                "status": 200,
+                "headers": {
+                  "Content-Type": "application/xml"
+                },
+                "body": {
+                  "type": "text",
+                  "contentType": "application/xml",
+                  "content": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ListBucketResult xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\"><Name>{{ request.params.bucket }}</Name><Prefix>{{ request.query.prefix or '' }}</Prefix>{% set items = resources | selectattr('bucket', 'equalto', request.params.bucket) | list %}{% set pfx = request.query.prefix or '' %}{% set ns = namespace(n=0) %}{% for o in items if o.key[:pfx | length] == pfx %}{% set ns.n = ns.n + 1 %}<Contents><Key>{{ o.key | replace('&', '&amp;') | replace('<', '&lt;') | replace('>', '&gt;') }}</Key><LastModified>{{ now() }}</LastModified><ETag>&quot;{{ o.etag }}&quot;</ETag><Size>{{ o.size }}</Size><StorageClass>STANDARD</StorageClass></Contents>{% endfor %}<KeyCount>{{ ns.n }}</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated></ListBucketResult>"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "put-bucket",
+          "name": "Crear bucket (CreateBucket)",
+          "method": "PUT",
+          "path": "/{bucket}",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Creado",
+              "rules": [],
+              "response": {
+                "status": 200,
+                "headers": {
+                  "Location": "/{{ request.params.bucket }}"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

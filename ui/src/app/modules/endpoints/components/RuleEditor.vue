@@ -8,7 +8,7 @@ const mode = defineModel<'all' | 'any'>('mode', { default: 'all' })
 const { t } = useI18n()
 
 const sources = computed(() =>
-  (['header', 'query', 'path', 'body', 'method', 'variable'] as RuleSource[]).map((value) => ({
+  (['header', 'query', 'path', 'body', 'method', 'variable', 'callCount'] as RuleSource[]).map((value) => ({
     value,
     title: t(`source.${value}`),
   })),
@@ -26,6 +26,7 @@ const keyPlaceholder: Record<RuleSource, string> = {
   body: 'user.email (vacío = body completo)',
   method: '',
   variable: 'MODO',
+  callCount: '',
 }
 
 const needsValue = (op: Operator) => op !== 'exists' && op !== 'notExists'
@@ -69,7 +70,7 @@ function onOperator(r: Rule) {
     <div v-for="(r, i) in model" :key="i" class="d-flex flex-wrap align-center gap-2">
       <FSelect v-model="r.source" :items="sources" hide-details style="max-width: 170px" />
       <FTextField
-        v-if="r.source !== 'method'"
+        v-if="r.source !== 'method' && r.source !== 'callCount'"
         v-model="r.key"
         class="mono"
         :placeholder="keyPlaceholder[r.source]"

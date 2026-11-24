@@ -1,0 +1,399 @@
+{
+  "format": "fake-services",
+  "formatVersion": 1,
+  "services": [
+    {
+      "schemaVersion": 1,
+      "id": "mifiel",
+      "name": "MiFiel",
+      "description": "Firma electrónica avanzada (API v1). Los documentos se guardan como recursos persistentes; al crearlos con callback_url, un workflow simula la firma y envía el webhook. Fuerza un rechazo con el escenario «rechazado» (header x-fakes-scenario: rechazado).",
+      "upstreamUrl": "https://app-sandbox.mifiel.com/api/v1",
+      "prefix": "/mifiel",
+      "auth": {
+        "type": "none"
+      },
+      "endpoints": [
+        {
+          "id": "post-documents",
+          "name": "Crear documento",
+          "method": "POST",
+          "path": "/documents",
+          "scenarios": [
+            {
+              "id": "rechazado",
+              "name": "Firmante rechaza (forzado)",
+              "rules": [
+                {
+                  "source": "header",
+                  "key": "x-fakes-scenario",
+                  "operator": "equals",
+                  "value": "rechazado"
+                }
+              ],
+              "resource": {
+                "collection": "documents",
+                "operation": "create",
+                "recordId": "{{ uuid() }}",
+                "data": {
+                  "file_name": "{{ request.body.file_name or request.body.name or 'documento.pdf' }}",
+                  "original_hash": "{{ request.body.original_hash or random_hex(64) }}",
+                  "callback_url": "{{ request.body.callback_url or '' }}",
+                  "signed": false,
+                  "signed_by_all": false,
+                  "status": [
+                    0,
+                    null
+                  ],
+                  "state": "pending",
+                  "signers": "{{ request.body.signatories or request.body.signers or [] }}",
+                  "created_at": "{{ now() }}",
+                  "rechazar": true
+                }
+              },
+              "workflows": [
+                {
+                  "workflowId": "procesar-firma",
+                  "when": "responseSent"
+                }
+              ],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": "{{ resource }}"
+                }
+              }
+            },
+            {
+              "id": "ok",
+              "name": "Documento creado",
+              "rules": [],
+              "resource": {
+                "collection": "documents",
+                "operation": "create",
+                "recordId": "{{ uuid() }}",
+                "data": {
+                  "file_name": "{{ request.body.file_name or request.body.name or 'documento.pdf' }}",
+                  "original_hash": "{{ request.body.original_hash or random_hex(64) }}",
+                  "callback_url": "{{ request.body.callback_url or '' }}",
+                  "signed": false,
+                  "signed_by_all": false,
+                  "status": [
+                    0,
+                    null
+                  ],
+                  "state": "pending",
+                  "signers": "{{ request.body.signatories or request.body.signers or [] }}",
+                  "widget_id": "{{ random_hex(12) }}",
+                  "created_at": "{{ now() }}"
+                }
+              },
+              "workflows": [
+                {
+                  "workflowId": "procesar-firma",
+                  "when": "responseSent"
+                }
+              ],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": "{{ resource }}"
+                }
+              }
+            }
+          ],
+          "description": "Crea el documento y lo guarda en la colección «documents». Si envías callback_url, a los 8 s se marca como firmado y se envía el webhook.",
+          "request": {
+            "body": {
+              "kind": "any",
+              "required": false,
+              "example": {
+                "file_name": "contrato.pdf",
+                "original_hash": "abc123",
+                "callback_url": "http://127.0.0.1:4000/mifiel/webhook-receptor",
+                "signatories": [
+                  {
+                    "name": "Ana López",
+                    "email": "ana@example.com",
+                    "tax_id": "LOPA800101AB1"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "id": "get-documents",
+          "name": "Listar documentos",
+          "method": "GET",
+          "path": "/documents",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Lista",
+              "rules": [],
+              "resource": {
+                "collection": "documents",
+                "operation": "list"
+              },
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": "{{ resources }}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-documents-id",
+          "name": "Consultar documento",
+          "method": "GET",
+          "path": "/documents/{id}",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Documento",
+              "rules": [],
+              "resource": {
+                "collection": "documents",
+                "operation": "get",
+                "recordId": "{{ request.params.id }}",
+                "onMissing": {
+                  "status": 404,
+                  "body": {
+                    "type": "json",
+                    "content": {
+                      "status": "error",
+                      "errors": [
+                        "Document {{ request.params.id }} not found"
+                      ]
+                    }
+                  }
+                }
+              },
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": "{{ resource }}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "delete-documents-id",
+          "name": "Eliminar documento",
+          "method": "DELETE",
+          "path": "/documents/{id}",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Eliminado",
+              "rules": [],
+              "resource": {
+                "collection": "documents",
+                "operation": "delete",
+                "recordId": "{{ request.params.id }}",
+                "onMissing": {
+                  "status": 404,
+                  "body": {
+                    "type": "json",
+                    "content": {
+                      "status": "error",
+                      "errors": [
+                        "Document {{ request.params.id }} not found"
+                      ]
+                    }
+                  }
+                }
+              },
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": {
+                    "status": "success",
+                    "message": "Destroyed document#{{ request.params.id }}"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-documents-id-file-signed",
+          "name": "Descargar PDF firmado",
+          "method": "GET",
+          "path": "/documents/{id}/file_signed",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "PDF",
+              "rules": [],
+              "resource": {
+                "collection": "documents",
+                "operation": "get",
+                "recordId": "{{ request.params.id }}",
+                "onMissing": {
+                  "status": 404,
+                  "body": {
+                    "type": "json",
+                    "content": {
+                      "status": "error",
+                      "errors": [
+                        "Document {{ request.params.id }} not found"
+                      ]
+                    }
+                  }
+                }
+              },
+              "response": {
+                "status": 200,
+                "headers": {
+                  "Content-Type": "application/pdf"
+                },
+                "body": {
+                  "type": "binary",
+                  "base64": "JVBERi0xLjQKJcfsj6IKMSAwIG9iago8PC9UeXBlL0NhdGFsb2cvUGFnZXMgMiAwIFI+PgplbmRvYmoKMiAwIG9iago8PC9UeXBlL1BhZ2VzL0tpZHNbXS9Db3VudCAwPj4KZW5kb2JqCnRyYWlsZXIKPDwvUm9vdCAxIDAgUj4+CiUlRU9GCg==",
+                  "contentType": "application/pdf"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "post-webhook-receptor",
+          "name": "Receptor de webhooks (pruebas)",
+          "method": "POST",
+          "path": "/webhook-receptor",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Recibido",
+              "rules": [],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": {
+                    "received": true
+                  }
+                }
+              }
+            }
+          ],
+          "description": "Úsalo como callback_url para ver los webhooks en el historial."
+        }
+      ],
+      "workflows": [
+        {
+          "id": "procesar-firma",
+          "name": "Procesar firma",
+          "description": "Espera, marca el documento como firmado (o rechazado) y avisa al callback_url.",
+          "steps": [
+            {
+              "id": "hay-callback",
+              "type": "condition",
+              "conditions": [
+                {
+                  "path": "response.body.callback_url",
+                  "operator": "notEquals",
+                  "value": ""
+                }
+              ],
+              "onFalse": "fin"
+            },
+            {
+              "id": "espera",
+              "type": "wait",
+              "durationMs": 8000
+            },
+            {
+              "id": "es-rechazo",
+              "type": "condition",
+              "conditions": [
+                {
+                  "path": "response.body.rechazar",
+                  "operator": "equals",
+                  "value": true
+                }
+              ],
+              "onTrue": "rechazar"
+            },
+            {
+              "id": "firmar",
+              "type": "resource",
+              "collection": "documents",
+              "operation": "update",
+              "recordId": "{{ response.body.id }}",
+              "data": {
+                "signed": true,
+                "signed_by_all": true,
+                "state": "signed",
+                "status": [
+                  1,
+                  null
+                ],
+                "signed_at": "{{ now() }}"
+              }
+            },
+            {
+              "id": "webhook-firmado",
+              "type": "http",
+              "method": "POST",
+              "url": "{{ response.body.callback_url }}",
+              "body": {
+                "type": "json",
+                "content": "{{ steps.firmar.resource }}"
+              },
+              "retry": {
+                "maxAttempts": 3,
+                "backoffMs": 2000
+              }
+            },
+            {
+              "id": "fin-ok",
+              "type": "end"
+            },
+            {
+              "id": "rechazar",
+              "type": "resource",
+              "collection": "documents",
+              "operation": "update",
+              "recordId": "{{ response.body.id }}",
+              "data": {
+                "state": "rejected",
+                "status": [
+                  2,
+                  "El firmante rechazó el documento"
+                ]
+              }
+            },
+            {
+              "id": "webhook-rechazado",
+              "type": "http",
+              "method": "POST",
+              "url": "{{ response.body.callback_url }}",
+              "body": {
+                "type": "json",
+                "content": "{{ steps.rechazar.resource }}"
+              },
+              "retry": {
+                "maxAttempts": 3,
+                "backoffMs": 2000
+              }
+            },
+            {
+              "id": "fin",
+              "type": "end"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

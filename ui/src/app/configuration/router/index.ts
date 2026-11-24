@@ -15,6 +15,11 @@ const router = createRouter({
       component: () => import('@/app/modules/services/pages/IndexServicesPage.vue'),
     },
     {
+      path: '/plantillas',
+      name: RouteNames.templates,
+      component: () => import('@/app/modules/templates/pages/TemplatesPage.vue'),
+    },
+    {
       path: '/servicios/:sid',
       name: RouteNames.service,
       component: () => import('@/app/modules/services/pages/ServiceDetailPage.vue'),

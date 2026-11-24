@@ -24,6 +24,8 @@ fn scenario(id: &str, name: &str, rules: Vec<Rule>, response: ResponseDef) -> Sc
         enabled: true,
         rule_mode: RuleMode::All,
         workflows: vec![],
+        probability: None,
+        resource: None,
         rules,
         response,
     }

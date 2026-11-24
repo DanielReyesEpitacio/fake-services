@@ -27,6 +27,12 @@ import type {
   ImportReport,
   OnConflict,
   AutostartStatus,
+  SpecImportReport,
+  TemplateInfo,
+  TemplateInstallReport,
+  CollectionInfo,
+  ResourceRecord,
+  DetectionReport,
 } from './types.ts'
 
 const BASE = '/api/v1'
@@ -179,11 +185,12 @@ export const api = {
   clearExecutions: () => request<{ deleted: number }>('DELETE', '/executions'),
 
   // Importar / exportar
-  exportBundle: (opts: { services?: string[]; workspace?: boolean; files?: boolean }) => {
+  exportBundle: (opts: { services?: string[]; workspace?: boolean; files?: boolean; resources?: boolean }) => {
     const q = new URLSearchParams()
     if (opts.services?.length) q.set('services', opts.services.join(','))
     if (opts.workspace) q.set('workspace', 'true')
     if (opts.files) q.set('files', 'true')
+    if (opts.resources) q.set('resources', 'true')
     return download(`/export?${q.toString()}`)
   },
   importBundle: (req: {
@@ -193,6 +200,34 @@ export const api = {
     workspaceName?: string
     dryRun?: boolean
   }) => request<ImportReport>('POST', '/import', req),
+
+  importSpec: (req: {
+    content: string
+    format?: 'openapi' | 'postman'
+    name?: string
+    prefix?: string
+    onConflict?: OnConflict
+    dryRun?: boolean
+  }) => request<SpecImportReport>('POST', '/import/spec', req),
+  validateAll: () => request<ValidationReport>('GET', '/validate'),
+  detect: (path: string) => request<DetectionReport>('POST', '/detect', { path }),
+
+  // Plantillas
+  templates: () => request<TemplateInfo[]>('GET', '/templates'),
+  template: (id: string) => request<Bundle>('GET', `/templates/${enc(id)}`),
+  installTemplate: (id: string, opts: { onConflict?: OnConflict; start?: boolean; dryRun?: boolean } = {}) =>
+    request<TemplateInstallReport>('POST', `/templates/${enc(id)}/install`, opts),
+
+  // Recursos simulados
+  collections: (sid: string) => request<CollectionInfo[]>('GET', `/services/${enc(sid)}/resources`),
+  resources: (sid: string, col: string) =>
+    request<ResourceRecord[]>('GET', `/services/${enc(sid)}/resources/${enc(col)}`),
+  putResource: (sid: string, col: string, id: string, data: unknown) =>
+    request<ResourceRecord>('PUT', `/services/${enc(sid)}/resources/${enc(col)}/${enc(id)}`, data),
+  deleteResource: (sid: string, col: string, id: string) =>
+    request<void>('DELETE', `/services/${enc(sid)}/resources/${enc(col)}/${enc(id)}`),
+  clearResources: (sid: string, col?: string) =>
+    request<{ deleted: number }>('DELETE', `/services/${enc(sid)}/resources${col ? `/${enc(col)}` : ''}`),
 
   // Sistema
   autostart: () => request<AutostartStatus>('GET', '/system/autostart'),

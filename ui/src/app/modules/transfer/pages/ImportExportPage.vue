@@ -5,7 +5,7 @@ import { api, ApiError } from '@/infrastructure/api/client.ts'
 import { refresh, store, toast, toastError } from '@/app/shared/state/live.ts'
 import IssuesList from '@/app/shared/components/IssuesList.vue'
 import PageHeader from '@/app/shared/components/PageHeader.vue'
-import type { Bundle, ImportMode, ImportReport, Issue, OnConflict } from '@/infrastructure/api/types.ts'
+import type { Bundle, ImportMode, ImportReport, Issue, OnConflict, SpecImportReport } from '@/infrastructure/api/types.ts'
 
 const router = useRouter()
 
@@ -14,6 +14,7 @@ const router = useRouter()
 const selected = ref<string[]>([])
 const includeWorkspace = ref(true)
 const includeFiles = ref(true)
+const includeResources = ref(false)
 const exporting = ref(false)
 
 watch(
@@ -31,6 +32,7 @@ async function doExport() {
       services: allSelected.value ? [] : selected.value,
       workspace: includeWorkspace.value,
       files: includeFiles.value,
+      resources: includeResources.value,
     })
     toast(`Exportado: ${name}`)
   } catch (e) {
@@ -52,6 +54,12 @@ const preview = ref<ImportReport | null>(null)
 const result = ref<ImportReport | null>(null)
 const issues = ref<Issue[]>([])
 const busy = ref(false)
+// Especificación (OpenAPI / Postman) en lugar de un bundle
+const specContent = ref<string | null>(null)
+const specName = ref('')
+const specPrefix = ref('')
+const specPreview = ref<SpecImportReport | null>(null)
+const specResult = ref<SpecImportReport | null>(null)
 
 watch(file, async (f) => {
   bundle.value = null
@@ -59,23 +67,81 @@ watch(file, async (f) => {
   result.value = null
   issues.value = []
   fileError.value = ''
+  specContent.value = null
+  specPreview.value = null
+  specResult.value = null
+  specName.value = ''
+  specPrefix.value = ''
   const one = Array.isArray(f) ? f[0] : f
   if (!one) return
+  const text = await one.text()
+  let data: { format?: string; workspace?: { name?: string } } | null = null
   try {
-    const data = JSON.parse(await one.text())
-    if (data?.format !== 'fake-services') {
-      fileError.value = 'El archivo no es una exportación de Fake Services.'
-      return
-    }
+    data = JSON.parse(text)
+  } catch {
+    data = null
+  }
+  if (data?.format !== 'fake-services') {
+    // OpenAPI, Swagger o Postman (JSON o YAML): el servidor detecta el formato.
+    specContent.value = text
+    await checkSpec()
+    return
+  }
+  try {
     bundle.value = data as Bundle
     workspaceName.value = data.workspace?.name ? `${data.workspace.name} (importado)` : 'Espacio importado'
     await check()
   } catch {
-    fileError.value = 'No se pudo leer el archivo: no es JSON válido.'
+    fileError.value = 'No se pudo leer el archivo.'
   }
 })
 
-watch([mode, onConflict], () => bundle.value && check())
+watch([mode, onConflict], () => {
+  if (bundle.value) check()
+  else if (specContent.value) checkSpec()
+})
+
+function specRequest(dryRun: boolean) {
+  return {
+    content: specContent.value!,
+    name: specName.value || undefined,
+    prefix: specPrefix.value || undefined,
+    onConflict: onConflict.value,
+    dryRun,
+  }
+}
+
+async function checkSpec() {
+  if (!specContent.value) return
+  issues.value = []
+  fileError.value = ''
+  try {
+    specPreview.value = await api.importSpec(specRequest(true))
+  } catch (e) {
+    specPreview.value = null
+    if (e instanceof ApiError && e.issues.length) issues.value = e.issues
+    else fileError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function doImportSpec() {
+  busy.value = true
+  issues.value = []
+  try {
+    specResult.value = await api.importSpec(specRequest(false))
+    toast('Especificación importada')
+    await refresh()
+  } catch (e) {
+    if (e instanceof ApiError && e.issues.length) issues.value = e.issues
+    else toastError(e)
+  } finally {
+    busy.value = false
+  }
+}
+
+const specFormatLabel = computed(() =>
+  specPreview.value?.format === 'postman' ? 'Colección de Postman' : 'OpenAPI / Swagger',
+)
 
 function request(dryRun: boolean) {
   return {
@@ -171,6 +237,7 @@ const summary = computed(() => {
             </div>
             <VSwitch v-model="includeWorkspace" label="Incluir ajustes del espacio (servidor, variables, webhooks)" color="primary" hide-details />
             <VSwitch v-model="includeFiles" label="Incluir archivos de la carpeta files/" color="primary" hide-details />
+            <VSwitch v-model="includeResources" label="Incluir recursos simulados guardados (documentos, objetos...)" color="primary" hide-details />
           </VCardText>
           <VCardActions>
             <VSpacer />
@@ -187,14 +254,49 @@ const summary = computed(() => {
           <VCardText class="d-flex flex-column gap-3">
             <VFileInput
               v-model="file"
-              accept=".json,application/json"
-              label="Archivo de Fake Services (.json)"
+              accept=".json,.yaml,.yml,application/json"
+              label="Exportación de Fake Services, OpenAPI/Swagger o colección de Postman"
               prepend-icon=""
               prepend-inner-icon="mdi-file-upload-outline"
               show-size
               hide-details
             />
             <VAlert v-if="fileError" type="error" variant="tonal" density="compact">{{ fileError }}</VAlert>
+
+            <!-- Especificación -->
+            <template v-if="specContent && (specPreview || issues.length)">
+              <VAlert v-if="specPreview" type="info" variant="tonal" density="compact" icon="mdi-file-document-outline">
+                {{ specFormatLabel }}: se creará el servicio <strong>{{ specPreview.serviceId }}</strong> con
+                {{ specPreview.endpoints }} endpoints. Cada respuesta documentada es un escenario (la primera 2xx es la
+                predeterminada; las demás se fuerzan con el header <code class="inline">x-fakes-scenario</code>).
+              </VAlert>
+              <div class="d-flex gap-3">
+                <FTextField v-model="specName" label="Nombre del servicio" placeholder="El del documento" class="flex-1-1" @change="checkSpec" />
+                <FTextField v-model="specPrefix" label="Prefijo" placeholder="/<id>" class="flex-1-1" @change="checkSpec" />
+              </div>
+              <div>
+                <div class="f-field__label">Si el servicio ya existe</div>
+                <VRadioGroup v-model="onConflict" hide-details>
+                  <VRadio value="rename" label="Importarlo como copia" />
+                  <VRadio value="replace" label="Reemplazar el existente" />
+                  <VRadio value="skip" label="Omitirlo" />
+                </VRadioGroup>
+              </div>
+              <IssuesList :issues="issues" />
+              <VAlert v-if="specPreview && !specResult && specPreview.warnings.length" type="warning" variant="tonal" density="compact" title="Avisos">
+                <ul class="ps-4 text-body-small">
+                  <li v-for="(w, i) in specPreview.warnings.slice(0, 12)" :key="i">{{ w }}</li>
+                  <li v-if="specPreview.warnings.length > 12">y {{ specPreview.warnings.length - 12 }} más…</li>
+                </ul>
+              </VAlert>
+              <VAlert v-if="specResult" type="success" variant="tonal" title="Importación completa">
+                <div class="text-body-small">Servicio {{ specResult.serviceId }} con {{ specResult.endpoints }} endpoints.</div>
+                <div class="d-flex gap-2 mt-2">
+                  <VBtn size="small" variant="tonal" @click="router.push(`/servicios/${specResult.serviceId}`)">Abrir servicio</VBtn>
+                  <VBtn size="small" variant="text" @click="reset">Importar otro</VBtn>
+                </div>
+              </VAlert>
+            </template>
 
             <template v-if="summary">
               <VAlert type="info" variant="tonal" density="compact" icon="mdi-package-variant-closed">
@@ -237,7 +339,8 @@ const summary = computed(() => {
               <VAlert v-if="result" type="success" variant="tonal" title="Importación completa">
                 <div class="text-body-small">
                   {{ result.created.length + result.replaced.length }} servicio(s), {{ result.endpoints }} endpoints,
-                  {{ result.workflows }} workflows y {{ result.files }} archivo(s).
+                  {{ result.workflows }} workflows, {{ result.files }} archivo(s)<template v-if="result.resources">
+                  y {{ result.resources }} recurso(s)</template>.
                 </div>
                 <div class="d-flex gap-2 mt-2">
                   <VBtn size="small" variant="tonal" @click="router.push('/servicios')">Ver servicios</VBtn>
@@ -246,6 +349,11 @@ const summary = computed(() => {
               </VAlert>
             </template>
           </VCardText>
+          <VCardActions v-if="specContent && specPreview && !specResult">
+            <VSpacer />
+            <VBtn variant="text" @click="reset">Cancelar</VBtn>
+            <VBtn color="primary" prepend-icon="mdi-upload" :loading="busy" @click="doImportSpec">Crear servicio</VBtn>
+          </VCardActions>
           <VCardActions v-if="bundle && !result">
             <VSpacer />
             <VBtn variant="text" @click="reset">Cancelar</VBtn>
@@ -256,7 +364,8 @@ const summary = computed(() => {
     </VRow>
 
     <VAlert type="info" variant="tonal" icon="mdi-robot-outline" class="mt-4">
-      También desde la API: <code class="inline">GET /api/v1/export</code> y <code class="inline">POST /api/v1/import</code>
+      También desde la API: <code class="inline">GET /api/v1/export</code>, <code class="inline">POST /api/v1/import</code> y
+      <code class="inline">POST /api/v1/import/spec</code> (OpenAPI o Postman)
       (esquema en <code class="inline">/api/v1/schemas/bundle</code>). Los workflows sueltos se exportan e importan desde su pantalla.
     </VAlert>
   </div>

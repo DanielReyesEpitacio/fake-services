@@ -876,6 +876,70 @@ impl WorkflowEngine {
                 }
             }
 
+            Action::Resource {
+                collection,
+                operation,
+                record_id,
+                data,
+                fail_if_missing,
+            } => {
+                let mj = Self::ctx_mj(rec);
+                let rid = match render_text(record_id, &mj, "recordId") {
+                    Ok(v) => v,
+                    Err(e) => return Outcome::Fail(e.to_string()),
+                };
+                let rdata = match data
+                    .as_ref()
+                    .map(|d| render_json(d, &mj, "data"))
+                    .transpose()
+                {
+                    Ok(v) => v,
+                    Err(e) => return Outcome::Fail(e.to_string()),
+                };
+                let outcome = self
+                    .store
+                    .resource_apply(
+                        &rec.workspace_id,
+                        &rec.service_id,
+                        collection,
+                        resource_op(*operation),
+                        Some(rid.as_str()),
+                        rdata,
+                    )
+                    .await;
+                let (result, msg, missing) = match outcome {
+                    Ok(fakes_store::ResourceOutcome::Record(r)) => (
+                        json!({"status": "completed", "found": true, "resource": r}),
+                        format!(
+                            "{} {collection}/{}",
+                            resource_verb(*operation),
+                            r["id"].as_str().unwrap_or(&rid)
+                        ),
+                        false,
+                    ),
+                    Ok(fakes_store::ResourceOutcome::List(items)) => (
+                        json!({"status": "completed", "found": true, "count": items.len(), "resources": items}),
+                        format!("{} registros en {collection}", items.len()),
+                        false,
+                    ),
+                    Ok(fakes_store::ResourceOutcome::Missing) => (
+                        json!({"status": "completed", "found": false}),
+                        format!("{collection}/{rid} no existe"),
+                        true,
+                    ),
+                    Err(e) => return Outcome::Fail(format!("recurso {collection}: {e}")),
+                };
+                rec.context["steps"][&sid] = result.clone();
+                if missing && *fail_if_missing {
+                    self.timeline(rec, "step_failed", Some(&sid), &msg, Value::Null)
+                        .await;
+                    return Outcome::Fail(msg);
+                }
+                self.timeline(rec, "resource", Some(&sid), &msg, result)
+                    .await;
+                Outcome::Next(None)
+            }
+
             Action::Fail { message } => {
                 let mj = Self::ctx_mj(rec);
                 let msg = render_text(message, &mj, "message").unwrap_or_else(|_| message.clone());
@@ -1079,6 +1143,32 @@ impl WorkflowEngine {
                 }
             }
         });
+    }
+}
+
+/// Operación del dominio → operación del almacén.
+pub fn resource_op(op: fakes_domain::ResourceOp) -> fakes_store::ResourceOperation {
+    use fakes_domain::ResourceOp as D;
+    use fakes_store::ResourceOperation as S;
+    match op {
+        D::Create => S::Create,
+        D::Upsert => S::Upsert,
+        D::Update => S::Update,
+        D::Get => S::Get,
+        D::Delete => S::Delete,
+        D::List => S::List,
+    }
+}
+
+fn resource_verb(op: fakes_domain::ResourceOp) -> &'static str {
+    use fakes_domain::ResourceOp as D;
+    match op {
+        D::Create => "Creado",
+        D::Upsert => "Guardado",
+        D::Update => "Actualizado",
+        D::Get => "Leído",
+        D::Delete => "Borrado",
+        D::List => "Listado",
     }
 }
 

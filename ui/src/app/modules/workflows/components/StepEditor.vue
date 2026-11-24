@@ -32,6 +32,15 @@ const otherWorkflows = computed(() =>
   props.workflows.filter((w) => w.id !== props.workflowId).map((w) => ({ title: w.name, value: w.id })),
 )
 
+const resourceOps = [
+  { value: 'create', title: 'Crear' },
+  { value: 'get', title: 'Leer' },
+  { value: 'update', title: 'Actualizar' },
+  { value: 'upsert', title: 'Crear o actualizar' },
+  { value: 'delete', title: 'Eliminar' },
+  { value: 'list', title: 'Listar' },
+]
+
 const needsValue = (op: Operator) => op !== 'exists' && op !== 'notExists'
 
 function valueText(v: unknown): string {
@@ -268,6 +277,32 @@ function ensureRetry() {
       <FSelect v-model="step.workflowId" :items="otherWorkflows" label="Workflow" no-data-text="No hay otros workflows en este servicio" />
       <JsonEditor v-model="step.input" label="Entrada (opcional)" hint="Objeto JSON disponible como input.* en el workflow hijo." />
       <VSwitch v-model="step.wait" label="Esperar a que termine antes de continuar" color="primary" hide-details />
+    </template>
+
+    <!-- Recurso persistente -->
+    <template v-else-if="step.type === 'resource'">
+      <div class="d-flex flex-wrap gap-3">
+        <FTextField v-model="step.collection" label="Colección" placeholder="documents" class="mono" style="min-width: 160px" />
+        <FSelect v-model="step.operation" :items="resourceOps" label="Operación" style="min-width: 180px" />
+        <FTextField
+          v-if="step.operation !== 'list'"
+          v-model="step.recordId"
+          label="Id del registro"
+          placeholder="{{ response.body.id }}"
+          class="mono flex-1-1"
+        />
+      </div>
+      <JsonEditor
+        v-if="['create', 'update', 'upsert'].includes(step.operation)"
+        v-model="step.data"
+        label="Datos (los textos son plantillas)"
+        hint="En update/upsert se combinan con el registro existente; null borra un campo."
+      />
+      <VSwitch v-model="step.failIfMissing" label="Fallar si el registro no existe" color="primary" hide-details />
+      <div class="text-body-small text-medium-emphasis">
+        El resultado queda en <code class="inline" v-text="'steps.' + step.id + '.resource'" /> (o
+        <code class="inline">resources</code> al listar) y <code class="inline" v-text="'steps.' + step.id + '.found'" />.
+      </div>
     </template>
 
     <!-- Simular error -->

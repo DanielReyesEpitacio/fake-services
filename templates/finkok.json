@@ -1,0 +1,350 @@
+{
+  "format": "fake-services",
+  "formatVersion": 1,
+  "appVersion": "0.1.0",
+  "services": [
+    {
+      "schemaVersion": 1,
+      "id": "finkok",
+      "name": "Finkok",
+      "description": "PAC de CFDI 4.0 (SOAP): timbrado, cancelación, estatus SAT y utilidades. Apunta tu cliente SOAP al WSDL de esta simulación: <URL del servicio>/servicios/soap/stamp.wsdl (también cancel.wsdl y utilities.wsdl).",
+      "upstreamUrl": "https://demo-facturacion.finkok.com/servicios/soap",
+      "prefix": "/finkok",
+      "variables": {
+        "NO_CERTIFICADO_SAT": "30001000000500003456",
+        "RFC_PROV_CERTIF": "SPR190613I52",
+        "RFC_EMISOR_DEFAULT": "EKU9003173C9"
+      },
+      "endpoints": [
+        {
+          "id": "post-servicios-soap-stamp",
+          "name": "Timbrado (stamp, quick_stamp, sign_stamp, stamped)",
+          "description": "Servicio SOAP de timbrado. La operación se detecta en el envelope. Devuelve el CFDI enviado con el TimbreFiscalDigital insertado (UUID, FechaTimbrado, SelloSAT). Usuario o contraseña vacíos → 300; xml vacío o no base64 → 301. Fuerza 302, 307 o 702 con el escenario activo o el header x-fakes-scenario.",
+          "enabled": true,
+          "method": "POST",
+          "path": "/servicios/soap/stamp",
+          "request": {
+            "body": {
+              "kind": "xml",
+              "required": true
+            }
+          },
+          "scenarios": [
+            {
+              "id": "credenciales-invalidas",
+              "name": "300 · Usuario y contraseña inválidos",
+              "ruleMode": "any",
+              "rules": [
+                {
+                  "source": "body",
+                  "key": "",
+                  "operator": "regex",
+                  "value": "<(\\w+:)?(username|password)>\\s*</|<(\\w+:)?(username|password)\\s*/>"
+                }
+              ],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "{%- set body = request.rawBody -%}\n{%- set op = 'stamped' if (':stamped>' in body or '<stamped>' in body or ':stamped ' in body or '<stamped ' in body) else ('quick_stamp' if 'quick_stamp' in body else ('sign_stamp' if 'sign_stamp' in body else 'stamp')) -%}\n{%- set b64 = (((body | split('xml>'))[1] | split('<'))[0] | replace('\\n', '') | replace('\\r', '') | replace(' ', '') | replace('\\t', '')) if 'xml>' in body else '' -%}\n{%- set cfdi = (b64 | b64decode) if b64 else '' -%}\n{%- set fecha = now('%Y-%m-%dT%H:%M:%S') -%}\n{%- set rfc = (((cfdi | split('Emisor'))[1] | split('Rfc=\"'))[1] | split('\"'))[0] if ('Emisor' in cfdi and 'Rfc=\"' in cfdi) else vars.RFC_EMISOR_DEFAULT -%}\n<?xml version='1.0' encoding='UTF-8'?>\n<senv:Envelope xmlns:senv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:tns=\"http://facturacion.finkok.com/stamp\" xmlns:s0=\"apps.services.soap.core.views\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><senv:Body><tns:{{ op }}Response><tns:{{ op }}Result><s0:xml/><s0:UUID/><s0:Fecha>{{ fecha }}</s0:Fecha><s0:CodEstatus>Usuario y contraseña inválidos</s0:CodEstatus><s0:SatSeal/><s0:Incidencias><s0:Incidencia><s0:IdIncidencia>{{ random_hex(32) }}</s0:IdIncidencia><s0:Uuid/><s0:CodigoError>300</s0:CodigoError><s0:WorkProcessId>{{ uuid() }}</s0:WorkProcessId><s0:MensajeIncidencia>Usuario y contraseña inválidos</s0:MensajeIncidencia><s0:RfcEmisor>{{ rfc }}</s0:RfcEmisor><s0:NoCertificadoPac/><s0:FechaRegistro>{{ fecha }}</s0:FechaRegistro></s0:Incidencia></s0:Incidencias><s0:NoCertificadoSAT/></tns:{{ op }}Result></tns:{{ op }}Response></senv:Body></senv:Envelope>",
+                  "contentType": "text/xml; charset=utf-8"
+                }
+              }
+            },
+            {
+              "id": "sello-mal-formado",
+              "name": "302 · Sello mal formado o inválido (forzar)",
+              "rules": [
+                {
+                  "source": "header",
+                  "key": "x-fakes-scenario",
+                  "operator": "equals",
+                  "value": "sello-mal-formado"
+                }
+              ],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "{%- set body = request.rawBody -%}\n{%- set op = 'stamped' if (':stamped>' in body or '<stamped>' in body or ':stamped ' in body or '<stamped ' in body) else ('quick_stamp' if 'quick_stamp' in body else ('sign_stamp' if 'sign_stamp' in body else 'stamp')) -%}\n{%- set b64 = (((body | split('xml>'))[1] | split('<'))[0] | replace('\\n', '') | replace('\\r', '') | replace(' ', '') | replace('\\t', '')) if 'xml>' in body else '' -%}\n{%- set cfdi = (b64 | b64decode) if b64 else '' -%}\n{%- set fecha = now('%Y-%m-%dT%H:%M:%S') -%}\n{%- set rfc = (((cfdi | split('Emisor'))[1] | split('Rfc=\"'))[1] | split('\"'))[0] if ('Emisor' in cfdi and 'Rfc=\"' in cfdi) else vars.RFC_EMISOR_DEFAULT -%}\n<?xml version='1.0' encoding='UTF-8'?>\n<senv:Envelope xmlns:senv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:tns=\"http://facturacion.finkok.com/stamp\" xmlns:s0=\"apps.services.soap.core.views\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><senv:Body><tns:{{ op }}Response><tns:{{ op }}Result><s0:xml/><s0:UUID/><s0:Fecha>{{ fecha }}</s0:Fecha><s0:CodEstatus>Sello mal formado o inválido</s0:CodEstatus><s0:SatSeal/><s0:Incidencias><s0:Incidencia><s0:IdIncidencia>{{ random_hex(32) }}</s0:IdIncidencia><s0:Uuid/><s0:CodigoError>302</s0:CodigoError><s0:WorkProcessId>{{ uuid() }}</s0:WorkProcessId><s0:MensajeIncidencia>Sello mal formado o inválido</s0:MensajeIncidencia><s0:RfcEmisor>{{ rfc }}</s0:RfcEmisor><s0:NoCertificadoPac/><s0:FechaRegistro>{{ fecha }}</s0:FechaRegistro></s0:Incidencia></s0:Incidencias><s0:NoCertificadoSAT/></tns:{{ op }}Result></tns:{{ op }}Response></senv:Body></senv:Envelope>",
+                  "contentType": "text/xml; charset=utf-8"
+                }
+              }
+            },
+            {
+              "id": "timbre-previo",
+              "name": "307 · El CFDI contiene un timbre previo (forzar)",
+              "rules": [
+                {
+                  "source": "header",
+                  "key": "x-fakes-scenario",
+                  "operator": "equals",
+                  "value": "timbre-previo"
+                }
+              ],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "{%- set body = request.rawBody -%}\n{%- set op = 'stamped' if (':stamped>' in body or '<stamped>' in body or ':stamped ' in body or '<stamped ' in body) else ('quick_stamp' if 'quick_stamp' in body else ('sign_stamp' if 'sign_stamp' in body else 'stamp')) -%}\n{%- set b64 = (((body | split('xml>'))[1] | split('<'))[0] | replace('\\n', '') | replace('\\r', '') | replace(' ', '') | replace('\\t', '')) if 'xml>' in body else '' -%}\n{%- set cfdi = (b64 | b64decode) if b64 else '' -%}\n{%- set fecha = now('%Y-%m-%dT%H:%M:%S') -%}\n{%- set rfc = (((cfdi | split('Emisor'))[1] | split('Rfc=\"'))[1] | split('\"'))[0] if ('Emisor' in cfdi and 'Rfc=\"' in cfdi) else vars.RFC_EMISOR_DEFAULT -%}\n<?xml version='1.0' encoding='UTF-8'?>\n<senv:Envelope xmlns:senv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:tns=\"http://facturacion.finkok.com/stamp\" xmlns:s0=\"apps.services.soap.core.views\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><senv:Body><tns:{{ op }}Response><tns:{{ op }}Result><s0:xml/><s0:UUID/><s0:Fecha>{{ fecha }}</s0:Fecha><s0:CodEstatus>El CFDI contiene un timbre previo</s0:CodEstatus><s0:SatSeal/><s0:Incidencias><s0:Incidencia><s0:IdIncidencia>{{ random_hex(32) }}</s0:IdIncidencia><s0:Uuid/><s0:CodigoError>307</s0:CodigoError><s0:WorkProcessId>{{ uuid() }}</s0:WorkProcessId><s0:MensajeIncidencia>El CFDI contiene un timbre previo</s0:MensajeIncidencia><s0:RfcEmisor>{{ rfc }}</s0:RfcEmisor><s0:NoCertificadoPac/><s0:FechaRegistro>{{ fecha }}</s0:FechaRegistro></s0:Incidencia></s0:Incidencias><s0:NoCertificadoSAT/></tns:{{ op }}Result></tns:{{ op }}Response></senv:Body></senv:Envelope>",
+                  "contentType": "text/xml; charset=utf-8"
+                }
+              }
+            },
+            {
+              "id": "emisor-no-registrado",
+              "name": "702 · Emisor no registrado en la cuenta (forzar)",
+              "rules": [
+                {
+                  "source": "header",
+                  "key": "x-fakes-scenario",
+                  "operator": "equals",
+                  "value": "emisor-no-registrado"
+                }
+              ],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "{%- set body = request.rawBody -%}\n{%- set op = 'stamped' if (':stamped>' in body or '<stamped>' in body or ':stamped ' in body or '<stamped ' in body) else ('quick_stamp' if 'quick_stamp' in body else ('sign_stamp' if 'sign_stamp' in body else 'stamp')) -%}\n{%- set b64 = (((body | split('xml>'))[1] | split('<'))[0] | replace('\\n', '') | replace('\\r', '') | replace(' ', '') | replace('\\t', '')) if 'xml>' in body else '' -%}\n{%- set cfdi = (b64 | b64decode) if b64 else '' -%}\n{%- set fecha = now('%Y-%m-%dT%H:%M:%S') -%}\n{%- set rfc = (((cfdi | split('Emisor'))[1] | split('Rfc=\"'))[1] | split('\"'))[0] if ('Emisor' in cfdi and 'Rfc=\"' in cfdi) else vars.RFC_EMISOR_DEFAULT -%}\n<?xml version='1.0' encoding='UTF-8'?>\n<senv:Envelope xmlns:senv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:tns=\"http://facturacion.finkok.com/stamp\" xmlns:s0=\"apps.services.soap.core.views\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><senv:Body><tns:{{ op }}Response><tns:{{ op }}Result><s0:xml/><s0:UUID/><s0:Fecha>{{ fecha }}</s0:Fecha><s0:CodEstatus>No se encontró el RFC del emisor</s0:CodEstatus><s0:SatSeal/><s0:Incidencias><s0:Incidencia><s0:IdIncidencia>{{ random_hex(32) }}</s0:IdIncidencia><s0:Uuid/><s0:CodigoError>702</s0:CodigoError><s0:WorkProcessId>{{ uuid() }}</s0:WorkProcessId><s0:MensajeIncidencia>No se encontró el RFC del emisor</s0:MensajeIncidencia><s0:RfcEmisor>{{ rfc }}</s0:RfcEmisor><s0:NoCertificadoPac/><s0:FechaRegistro>{{ fecha }}</s0:FechaRegistro></s0:Incidencia></s0:Incidencias><s0:NoCertificadoSAT/></tns:{{ op }}Result></tns:{{ op }}Response></senv:Body></senv:Envelope>",
+                  "contentType": "text/xml; charset=utf-8"
+                }
+              }
+            },
+            {
+              "id": "timbrado-exitoso",
+              "name": "Timbrado exitoso",
+              "rules": [
+                {
+                  "source": "body",
+                  "key": "",
+                  "operator": "regex",
+                  "value": "<(\\w+:)?xml>\\s*[A-Za-z0-9+/=]{8}"
+                }
+              ],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "{%- set body = request.rawBody -%}\n{%- set op = 'stamped' if (':stamped>' in body or '<stamped>' in body or ':stamped ' in body or '<stamped ' in body) else ('quick_stamp' if 'quick_stamp' in body else ('sign_stamp' if 'sign_stamp' in body else 'stamp')) -%}\n{%- set b64 = (((body | split('xml>'))[1] | split('<'))[0] | replace('\\n', '') | replace('\\r', '') | replace(' ', '') | replace('\\t', '')) if 'xml>' in body else '' -%}\n{%- set cfdi = (b64 | b64decode) if b64 else '' -%}\n{%- set fecha = now('%Y-%m-%dT%H:%M:%S') -%}\n{%- set rfc = (((cfdi | split('Emisor'))[1] | split('Rfc=\"'))[1] | split('\"'))[0] if ('Emisor' in cfdi and 'Rfc=\"' in cfdi) else vars.RFC_EMISOR_DEFAULT -%}\n{%- set uuid_ = uuid() | upper -%}\n{%- set sello_cfd = (((cfdi | split(' Sello=\"'))[1] | split('\"'))[0]) if ' Sello=\"' in cfdi else random_string(344) -%}\n{%- set sello_sat = random_string(342) ~ '==' -%}\n{%- set tfd = '<tfd:TimbreFiscalDigital xmlns:tfd=\"http://www.sat.gob.mx/TimbreFiscalDigital\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:schemaLocation=\"http://www.sat.gob.mx/TimbreFiscalDigital http://www.sat.gob.mx/sitio_internet/cfd/TimbreFiscalDigital/TimbreFiscalDigitalv11.xsd\" Version=\"1.1\" UUID=\"' ~ uuid_ ~ '\" FechaTimbrado=\"' ~ fecha ~ '\" RfcProvCertif=\"' ~ vars.RFC_PROV_CERTIF ~ '\" SelloCFD=\"' ~ sello_cfd ~ '\" NoCertificadoSAT=\"' ~ vars.NO_CERTIFICADO_SAT ~ '\" SelloSAT=\"' ~ sello_sat ~ '\"/>' -%}\n{%- if '</cfdi:Complemento>' in cfdi -%}\n{%- set timbrado = cfdi | replace('</cfdi:Complemento>', tfd ~ '</cfdi:Complemento>') -%}\n{%- elif '</cfdi:Comprobante>' in cfdi -%}\n{%- set timbrado = cfdi | replace('</cfdi:Comprobante>', '<cfdi:Complemento>' ~ tfd ~ '</cfdi:Complemento></cfdi:Comprobante>') -%}\n{%- else -%}\n{%- set timbrado = tfd -%}\n{%- endif -%}\n<?xml version='1.0' encoding='UTF-8'?>\n<senv:Envelope xmlns:senv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:tns=\"http://facturacion.finkok.com/stamp\" xmlns:s0=\"apps.services.soap.core.views\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><senv:Body><tns:{{ op }}Response><tns:{{ op }}Result><s0:xml>{{ timbrado | e }}</s0:xml><s0:UUID>{{ uuid_ }}</s0:UUID><s0:Fecha>{{ fecha }}</s0:Fecha><s0:CodEstatus>Comprobante timbrado satisfactoriamente</s0:CodEstatus><s0:SatSeal>{{ sello_sat }}</s0:SatSeal><s0:Incidencias/><s0:NoCertificadoSAT>{{ vars.NO_CERTIFICADO_SAT }}</s0:NoCertificadoSAT></tns:{{ op }}Result></tns:{{ op }}Response></senv:Body></senv:Envelope>",
+                  "contentType": "text/xml; charset=utf-8"
+                },
+                "delayMs": 250
+              }
+            },
+            {
+              "id": "xml-mal-formado",
+              "name": "301 · XML mal formado",
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "{%- set body = request.rawBody -%}\n{%- set op = 'stamped' if (':stamped>' in body or '<stamped>' in body or ':stamped ' in body or '<stamped ' in body) else ('quick_stamp' if 'quick_stamp' in body else ('sign_stamp' if 'sign_stamp' in body else 'stamp')) -%}\n{%- set b64 = (((body | split('xml>'))[1] | split('<'))[0] | replace('\\n', '') | replace('\\r', '') | replace(' ', '') | replace('\\t', '')) if 'xml>' in body else '' -%}\n{%- set cfdi = (b64 | b64decode) if b64 else '' -%}\n{%- set fecha = now('%Y-%m-%dT%H:%M:%S') -%}\n{%- set rfc = (((cfdi | split('Emisor'))[1] | split('Rfc=\"'))[1] | split('\"'))[0] if ('Emisor' in cfdi and 'Rfc=\"' in cfdi) else vars.RFC_EMISOR_DEFAULT -%}\n<?xml version='1.0' encoding='UTF-8'?>\n<senv:Envelope xmlns:senv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:tns=\"http://facturacion.finkok.com/stamp\" xmlns:s0=\"apps.services.soap.core.views\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><senv:Body><tns:{{ op }}Response><tns:{{ op }}Result><s0:xml/><s0:UUID/><s0:Fecha>{{ fecha }}</s0:Fecha><s0:CodEstatus>XML mal formado</s0:CodEstatus><s0:SatSeal/><s0:Incidencias><s0:Incidencia><s0:IdIncidencia>{{ random_hex(32) }}</s0:IdIncidencia><s0:Uuid/><s0:CodigoError>301</s0:CodigoError><s0:WorkProcessId>{{ uuid() }}</s0:WorkProcessId><s0:MensajeIncidencia>XML mal formado</s0:MensajeIncidencia><s0:RfcEmisor>{{ rfc }}</s0:RfcEmisor><s0:NoCertificadoPac/><s0:FechaRegistro>{{ fecha }}</s0:FechaRegistro></s0:Incidencia></s0:Incidencias><s0:NoCertificadoSAT/></tns:{{ op }}Result></tns:{{ op }}Response></senv:Body></senv:Envelope>",
+                  "contentType": "text/xml; charset=utf-8"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "post-servicios-soap-cancel",
+          "name": "Cancelación (cancel, get_sat_status)",
+          "description": "Servicio SOAP de cancelación y consulta de estatus ante el SAT. Toma el UUID y el RFC del envelope. Por defecto la cancelación es exitosa (201) y el CFDI aparece vigente y cancelable; fuerza «ya cancelado», «no encontrado» o «en proceso» para otros casos.",
+          "enabled": true,
+          "method": "POST",
+          "path": "/servicios/soap/cancel",
+          "request": {
+            "body": {
+              "kind": "xml",
+              "required": true
+            }
+          },
+          "scenarios": [
+            {
+              "id": "credenciales-invalidas",
+              "name": "Usuario y contraseña inválidos",
+              "ruleMode": "any",
+              "rules": [
+                {
+                  "source": "body",
+                  "key": "",
+                  "operator": "regex",
+                  "value": "<(\\w+:)?(username|password)>\\s*</|<(\\w+:)?(username|password)\\s*/>"
+                }
+              ],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "{%- set body = request.rawBody -%}\n{%- set op = 'get_sat_status' if 'get_sat_status' in body else 'cancel' -%}\n{%- set fecha = now('%Y-%m-%dT%H:%M:%S') -%}\n{%- set uuid_ = ((body | split('UUID=\"'))[1] | split('\"'))[0] if 'UUID=\"' in body else (((body | split('uuid>'))[1] | split('<'))[0] if 'uuid>' in body else (uuid() | upper)) -%}\n{%- set rfc = ((body | split('taxpayer_id>'))[1] | split('<'))[0] if 'taxpayer_id>' in body else vars.RFC_EMISOR_DEFAULT -%}\n<?xml version='1.0' encoding='UTF-8'?>\n<senv:Envelope xmlns:senv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:tns=\"http://facturacion.finkok.com/cancel\" xmlns:s0=\"apps.services.soap.core.views\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><senv:Body><tns:{{ op }}Response><tns:{{ op }}Result>{%- if op == 'get_sat_status' -%}<s0:error>Usuario y contraseña inválidos</s0:error>{%- else -%}<s0:Fecha>{{ fecha }}</s0:Fecha><s0:CodEstatus>Usuario y contraseña inválidos</s0:CodEstatus>{%- endif -%}</tns:{{ op }}Result></tns:{{ op }}Response></senv:Body></senv:Envelope>",
+                  "contentType": "text/xml; charset=utf-8"
+                }
+              }
+            },
+            {
+              "id": "previamente-cancelado",
+              "name": "202 · Previamente cancelado (forzar)",
+              "rules": [
+                {
+                  "source": "header",
+                  "key": "x-fakes-scenario",
+                  "operator": "equals",
+                  "value": "previamente-cancelado"
+                }
+              ],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "{%- set body = request.rawBody -%}\n{%- set op = 'get_sat_status' if 'get_sat_status' in body else 'cancel' -%}\n{%- set fecha = now('%Y-%m-%dT%H:%M:%S') -%}\n{%- set uuid_ = ((body | split('UUID=\"'))[1] | split('\"'))[0] if 'UUID=\"' in body else (((body | split('uuid>'))[1] | split('<'))[0] if 'uuid>' in body else (uuid() | upper)) -%}\n{%- set rfc = ((body | split('taxpayer_id>'))[1] | split('<'))[0] if 'taxpayer_id>' in body else vars.RFC_EMISOR_DEFAULT -%}\n<?xml version='1.0' encoding='UTF-8'?>\n<senv:Envelope xmlns:senv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:tns=\"http://facturacion.finkok.com/cancel\" xmlns:s0=\"apps.services.soap.core.views\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><senv:Body>{%- if op == 'get_sat_status' -%}<tns:get_sat_statusResponse><tns:get_sat_statusResult><s0:sat><s0:CodigoEstatus>S - Comprobante obtenido satisfactoriamente.</s0:CodigoEstatus><s0:EsCancelable>Cancelable sin aceptación</s0:EsCancelable><s0:Estado>Cancelado</s0:Estado><s0:EstatusCancelacion>Cancelado sin aceptación</s0:EstatusCancelacion><s0:ValidacionEFOS>200</s0:ValidacionEFOS></s0:sat><s0:error/></tns:get_sat_statusResult></tns:get_sat_statusResponse>{%- else -%}<tns:cancelResponse><tns:cancelResult><s0:Folios><s0:Folio><s0:EstatusUUID>202</s0:EstatusUUID><s0:UUID>{{ uuid_ }}</s0:UUID><s0:EstatusCancelacion>Cancelado sin aceptación</s0:EstatusCancelacion></s0:Folio></s0:Folios><s0:Acuse>{{ ('<?xml version=\"1.0\" encoding=\"UTF-8\"?><Acuse xmlns=\"http://cancelacfd.sat.gob.mx\" Fecha=\"' ~ fecha ~ '\" RfcEmisor=\"' ~ rfc ~ '\"><Folios><UUID>' ~ uuid_ ~ '</UUID><EstatusUUID>202</EstatusUUID></Folios></Acuse>') | e }}</s0:Acuse><s0:Fecha>{{ fecha }}</s0:Fecha><s0:RfcEmisor>{{ rfc }}</s0:RfcEmisor><s0:CodEstatus/></tns:cancelResult></tns:cancelResponse>{%- endif -%}</senv:Body></senv:Envelope>",
+                  "contentType": "text/xml; charset=utf-8"
+                }
+              }
+            },
+            {
+              "id": "uuid-no-encontrado",
+              "name": "205 · UUID no encontrado (forzar)",
+              "rules": [
+                {
+                  "source": "header",
+                  "key": "x-fakes-scenario",
+                  "operator": "equals",
+                  "value": "uuid-no-encontrado"
+                }
+              ],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "{%- set body = request.rawBody -%}\n{%- set op = 'get_sat_status' if 'get_sat_status' in body else 'cancel' -%}\n{%- set fecha = now('%Y-%m-%dT%H:%M:%S') -%}\n{%- set uuid_ = ((body | split('UUID=\"'))[1] | split('\"'))[0] if 'UUID=\"' in body else (((body | split('uuid>'))[1] | split('<'))[0] if 'uuid>' in body else (uuid() | upper)) -%}\n{%- set rfc = ((body | split('taxpayer_id>'))[1] | split('<'))[0] if 'taxpayer_id>' in body else vars.RFC_EMISOR_DEFAULT -%}\n<?xml version='1.0' encoding='UTF-8'?>\n<senv:Envelope xmlns:senv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:tns=\"http://facturacion.finkok.com/cancel\" xmlns:s0=\"apps.services.soap.core.views\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><senv:Body>{%- if op == 'get_sat_status' -%}<tns:get_sat_statusResponse><tns:get_sat_statusResult><s0:sat><s0:CodigoEstatus>N - 602: Comprobante no encontrado.</s0:CodigoEstatus><s0:EsCancelable></s0:EsCancelable><s0:Estado>No Encontrado</s0:Estado><s0:EstatusCancelacion/><s0:ValidacionEFOS>200</s0:ValidacionEFOS></s0:sat><s0:error/></tns:get_sat_statusResult></tns:get_sat_statusResponse>{%- else -%}<tns:cancelResponse><tns:cancelResult><s0:Folios><s0:Folio><s0:EstatusUUID>205</s0:EstatusUUID><s0:UUID>{{ uuid_ }}</s0:UUID><s0:EstatusCancelacion/></s0:Folio></s0:Folios><s0:Acuse>{{ ('<?xml version=\"1.0\" encoding=\"UTF-8\"?><Acuse xmlns=\"http://cancelacfd.sat.gob.mx\" Fecha=\"' ~ fecha ~ '\" RfcEmisor=\"' ~ rfc ~ '\"><Folios><UUID>' ~ uuid_ ~ '</UUID><EstatusUUID>205</EstatusUUID></Folios></Acuse>') | e }}</s0:Acuse><s0:Fecha>{{ fecha }}</s0:Fecha><s0:RfcEmisor>{{ rfc }}</s0:RfcEmisor><s0:CodEstatus>UUID no encontrado</s0:CodEstatus></tns:cancelResult></tns:cancelResponse>{%- endif -%}</senv:Body></senv:Envelope>",
+                  "contentType": "text/xml; charset=utf-8"
+                }
+              }
+            },
+            {
+              "id": "en-proceso",
+              "name": "201 · Cancelación en proceso, requiere aceptación (forzar)",
+              "rules": [
+                {
+                  "source": "header",
+                  "key": "x-fakes-scenario",
+                  "operator": "equals",
+                  "value": "en-proceso"
+                }
+              ],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "{%- set body = request.rawBody -%}\n{%- set op = 'get_sat_status' if 'get_sat_status' in body else 'cancel' -%}\n{%- set fecha = now('%Y-%m-%dT%H:%M:%S') -%}\n{%- set uuid_ = ((body | split('UUID=\"'))[1] | split('\"'))[0] if 'UUID=\"' in body else (((body | split('uuid>'))[1] | split('<'))[0] if 'uuid>' in body else (uuid() | upper)) -%}\n{%- set rfc = ((body | split('taxpayer_id>'))[1] | split('<'))[0] if 'taxpayer_id>' in body else vars.RFC_EMISOR_DEFAULT -%}\n<?xml version='1.0' encoding='UTF-8'?>\n<senv:Envelope xmlns:senv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:tns=\"http://facturacion.finkok.com/cancel\" xmlns:s0=\"apps.services.soap.core.views\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><senv:Body>{%- if op == 'get_sat_status' -%}<tns:get_sat_statusResponse><tns:get_sat_statusResult><s0:sat><s0:CodigoEstatus>S - Comprobante obtenido satisfactoriamente.</s0:CodigoEstatus><s0:EsCancelable>Cancelable con aceptación</s0:EsCancelable><s0:Estado>Vigente</s0:Estado><s0:EstatusCancelacion>En proceso</s0:EstatusCancelacion><s0:ValidacionEFOS>200</s0:ValidacionEFOS></s0:sat><s0:error/></tns:get_sat_statusResult></tns:get_sat_statusResponse>{%- else -%}<tns:cancelResponse><tns:cancelResult><s0:Folios><s0:Folio><s0:EstatusUUID>201</s0:EstatusUUID><s0:UUID>{{ uuid_ }}</s0:UUID><s0:EstatusCancelacion>En proceso</s0:EstatusCancelacion></s0:Folio></s0:Folios><s0:Acuse>{{ ('<?xml version=\"1.0\" encoding=\"UTF-8\"?><Acuse xmlns=\"http://cancelacfd.sat.gob.mx\" Fecha=\"' ~ fecha ~ '\" RfcEmisor=\"' ~ rfc ~ '\"><Folios><UUID>' ~ uuid_ ~ '</UUID><EstatusUUID>201</EstatusUUID></Folios></Acuse>') | e }}</s0:Acuse><s0:Fecha>{{ fecha }}</s0:Fecha><s0:RfcEmisor>{{ rfc }}</s0:RfcEmisor><s0:CodEstatus/></tns:cancelResult></tns:cancelResponse>{%- endif -%}</senv:Body></senv:Envelope>",
+                  "contentType": "text/xml; charset=utf-8"
+                }
+              }
+            },
+            {
+              "id": "cancelacion-exitosa",
+              "name": "201 · Cancelación exitosa",
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "{%- set body = request.rawBody -%}\n{%- set op = 'get_sat_status' if 'get_sat_status' in body else 'cancel' -%}\n{%- set fecha = now('%Y-%m-%dT%H:%M:%S') -%}\n{%- set uuid_ = ((body | split('UUID=\"'))[1] | split('\"'))[0] if 'UUID=\"' in body else (((body | split('uuid>'))[1] | split('<'))[0] if 'uuid>' in body else (uuid() | upper)) -%}\n{%- set rfc = ((body | split('taxpayer_id>'))[1] | split('<'))[0] if 'taxpayer_id>' in body else vars.RFC_EMISOR_DEFAULT -%}\n<?xml version='1.0' encoding='UTF-8'?>\n<senv:Envelope xmlns:senv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:tns=\"http://facturacion.finkok.com/cancel\" xmlns:s0=\"apps.services.soap.core.views\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><senv:Body>{%- if op == 'get_sat_status' -%}<tns:get_sat_statusResponse><tns:get_sat_statusResult><s0:sat><s0:CodigoEstatus>S - Comprobante obtenido satisfactoriamente.</s0:CodigoEstatus><s0:EsCancelable>Cancelable sin aceptación</s0:EsCancelable><s0:Estado>Vigente</s0:Estado><s0:EstatusCancelacion/><s0:ValidacionEFOS>200</s0:ValidacionEFOS></s0:sat><s0:error/></tns:get_sat_statusResult></tns:get_sat_statusResponse>{%- else -%}<tns:cancelResponse><tns:cancelResult><s0:Folios><s0:Folio><s0:EstatusUUID>201</s0:EstatusUUID><s0:UUID>{{ uuid_ }}</s0:UUID><s0:EstatusCancelacion>Cancelado sin aceptación</s0:EstatusCancelacion></s0:Folio></s0:Folios><s0:Acuse>{{ ('<?xml version=\"1.0\" encoding=\"UTF-8\"?><Acuse xmlns=\"http://cancelacfd.sat.gob.mx\" Fecha=\"' ~ fecha ~ '\" RfcEmisor=\"' ~ rfc ~ '\"><Folios><UUID>' ~ uuid_ ~ '</UUID><EstatusUUID>201</EstatusUUID></Folios></Acuse>') | e }}</s0:Acuse><s0:Fecha>{{ fecha }}</s0:Fecha><s0:RfcEmisor>{{ rfc }}</s0:RfcEmisor><s0:CodEstatus/></tns:cancelResult></tns:cancelResponse>{%- endif -%}</senv:Body></senv:Envelope>",
+                  "contentType": "text/xml; charset=utf-8"
+                },
+                "delayMs": 300
+              }
+            }
+          ]
+        },
+        {
+          "id": "post-servicios-soap-utilities",
+          "name": "Utilidades (datetime)",
+          "description": "Devuelve la fecha y hora del servidor (operación datetime).",
+          "enabled": true,
+          "method": "POST",
+          "path": "/servicios/soap/utilities",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Fecha y hora",
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "<?xml version='1.0' encoding='UTF-8'?>\n<senv:Envelope xmlns:senv=\"http://schemas.xmlsoap.org/soap/envelope/\" xmlns:tns=\"http://facturacion.finkok.com/utilities\" xmlns:s0=\"apps.services.soap.core.views\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><senv:Body><tns:datetimeResponse><tns:datetimeResult><s0:datetime>{{ now('%Y-%m-%d %H:%M:%S') }}</s0:datetime><s0:error/></tns:datetimeResult></tns:datetimeResponse></senv:Body></senv:Envelope>",
+                  "contentType": "text/xml; charset=utf-8"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-servicios-soap-stamp-wsdl",
+          "name": "WSDL de timbrado",
+          "description": "Descriptor SOAP para clientes (zeep, node-soap, SoapClient de PHP). La dirección apunta a esta simulación.",
+          "enabled": true,
+          "method": "GET",
+          "path": "/servicios/soap/stamp.wsdl",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "WSDL",
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "<?xml version='1.0' encoding='UTF-8'?>\n<wsdl:definitions xmlns:wsdl=\"http://schemas.xmlsoap.org/wsdl/\" xmlns:soap=\"http://schemas.xmlsoap.org/wsdl/soap/\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:tns=\"http://facturacion.finkok.com/stamp\" xmlns:s0=\"apps.services.soap.core.views\" targetNamespace=\"http://facturacion.finkok.com/stamp\" name=\"Application\"><wsdl:types><xs:schema targetNamespace=\"apps.services.soap.core.views\" elementFormDefault=\"qualified\"><xs:complexType name=\"Incidencia\"><xs:sequence><xs:element name=\"IdIncidencia\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"Uuid\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"CodigoError\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"WorkProcessId\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"MensajeIncidencia\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"RfcEmisor\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"NoCertificadoPac\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"FechaRegistro\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType><xs:complexType name=\"IncidenciaArray\"><xs:sequence><xs:element name=\"Incidencia\" type=\"s0:Incidencia\" minOccurs=\"0\" maxOccurs=\"unbounded\" nillable=\"true\"/></xs:sequence></xs:complexType><xs:complexType name=\"AcuseRecepcionCFDI\"><xs:sequence><xs:element name=\"xml\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"UUID\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"faultstring\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"Fecha\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"CodEstatus\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"faultcode\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"SatSeal\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"Incidencias\" type=\"s0:IncidenciaArray\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"NoCertificadoSAT\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:schema><xs:schema targetNamespace=\"http://facturacion.finkok.com/stamp\" elementFormDefault=\"qualified\"><xs:import namespace=\"apps.services.soap.core.views\"/><xs:element name=\"stamp\"><xs:complexType><xs:sequence><xs:element name=\"xml\" type=\"xs:base64Binary\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"username\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"password\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element><xs:element name=\"stampResponse\"><xs:complexType><xs:sequence><xs:element name=\"stampResult\" type=\"s0:AcuseRecepcionCFDI\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element><xs:element name=\"quick_stamp\"><xs:complexType><xs:sequence><xs:element name=\"xml\" type=\"xs:base64Binary\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"username\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"password\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element><xs:element name=\"quick_stampResponse\"><xs:complexType><xs:sequence><xs:element name=\"quick_stampResult\" type=\"s0:AcuseRecepcionCFDI\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element><xs:element name=\"sign_stamp\"><xs:complexType><xs:sequence><xs:element name=\"xml\" type=\"xs:base64Binary\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"username\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"password\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element><xs:element name=\"sign_stampResponse\"><xs:complexType><xs:sequence><xs:element name=\"sign_stampResult\" type=\"s0:AcuseRecepcionCFDI\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element><xs:element name=\"stamped\"><xs:complexType><xs:sequence><xs:element name=\"xml\" type=\"xs:base64Binary\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"username\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"password\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element><xs:element name=\"stampedResponse\"><xs:complexType><xs:sequence><xs:element name=\"stampedResult\" type=\"s0:AcuseRecepcionCFDI\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element></xs:schema></wsdl:types><wsdl:message name=\"stamp\"><wsdl:part name=\"stamp\" element=\"tns:stamp\"/></wsdl:message><wsdl:message name=\"stampResponse\"><wsdl:part name=\"stampResponse\" element=\"tns:stampResponse\"/></wsdl:message><wsdl:message name=\"quick_stamp\"><wsdl:part name=\"quick_stamp\" element=\"tns:quick_stamp\"/></wsdl:message><wsdl:message name=\"quick_stampResponse\"><wsdl:part name=\"quick_stampResponse\" element=\"tns:quick_stampResponse\"/></wsdl:message><wsdl:message name=\"sign_stamp\"><wsdl:part name=\"sign_stamp\" element=\"tns:sign_stamp\"/></wsdl:message><wsdl:message name=\"sign_stampResponse\"><wsdl:part name=\"sign_stampResponse\" element=\"tns:sign_stampResponse\"/></wsdl:message><wsdl:message name=\"stamped\"><wsdl:part name=\"stamped\" element=\"tns:stamped\"/></wsdl:message><wsdl:message name=\"stampedResponse\"><wsdl:part name=\"stampedResponse\" element=\"tns:stampedResponse\"/></wsdl:message><wsdl:portType name=\"Application\"><wsdl:operation name=\"stamp\"><wsdl:input name=\"stamp\" message=\"tns:stamp\"/><wsdl:output name=\"stampResponse\" message=\"tns:stampResponse\"/></wsdl:operation><wsdl:operation name=\"quick_stamp\"><wsdl:input name=\"quick_stamp\" message=\"tns:quick_stamp\"/><wsdl:output name=\"quick_stampResponse\" message=\"tns:quick_stampResponse\"/></wsdl:operation><wsdl:operation name=\"sign_stamp\"><wsdl:input name=\"sign_stamp\" message=\"tns:sign_stamp\"/><wsdl:output name=\"sign_stampResponse\" message=\"tns:sign_stampResponse\"/></wsdl:operation><wsdl:operation name=\"stamped\"><wsdl:input name=\"stamped\" message=\"tns:stamped\"/><wsdl:output name=\"stampedResponse\" message=\"tns:stampedResponse\"/></wsdl:operation></wsdl:portType><wsdl:binding name=\"Application\" type=\"tns:Application\"><soap:binding style=\"document\" transport=\"http://schemas.xmlsoap.org/soap/http\"/><wsdl:operation name=\"stamp\"><soap:operation soapAction=\"stamp\" style=\"document\"/><wsdl:input name=\"stamp\"><soap:body use=\"literal\"/></wsdl:input><wsdl:output name=\"stampResponse\"><soap:body use=\"literal\"/></wsdl:output></wsdl:operation><wsdl:operation name=\"quick_stamp\"><soap:operation soapAction=\"quick_stamp\" style=\"document\"/><wsdl:input name=\"quick_stamp\"><soap:body use=\"literal\"/></wsdl:input><wsdl:output name=\"quick_stampResponse\"><soap:body use=\"literal\"/></wsdl:output></wsdl:operation><wsdl:operation name=\"sign_stamp\"><soap:operation soapAction=\"sign_stamp\" style=\"document\"/><wsdl:input name=\"sign_stamp\"><soap:body use=\"literal\"/></wsdl:input><wsdl:output name=\"sign_stampResponse\"><soap:body use=\"literal\"/></wsdl:output></wsdl:operation><wsdl:operation name=\"stamped\"><soap:operation soapAction=\"stamped\" style=\"document\"/><wsdl:input name=\"stamped\"><soap:body use=\"literal\"/></wsdl:input><wsdl:output name=\"stampedResponse\"><soap:body use=\"literal\"/></wsdl:output></wsdl:operation></wsdl:binding><wsdl:service name=\"StampSOAP\"><wsdl:port name=\"Application\" binding=\"tns:Application\"><soap:address location=\"{{ service.url }}/servicios/soap/stamp\"/></wsdl:port></wsdl:service></wsdl:definitions>\n",
+                  "contentType": "text/xml; charset=utf-8"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-servicios-soap-cancel-wsdl",
+          "name": "WSDL de cancelación",
+          "description": "Descriptor SOAP para clientes (zeep, node-soap, SoapClient de PHP). La dirección apunta a esta simulación.",
+          "enabled": true,
+          "method": "GET",
+          "path": "/servicios/soap/cancel.wsdl",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "WSDL",
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "<?xml version='1.0' encoding='UTF-8'?>\n<wsdl:definitions xmlns:wsdl=\"http://schemas.xmlsoap.org/wsdl/\" xmlns:soap=\"http://schemas.xmlsoap.org/wsdl/soap/\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:tns=\"http://facturacion.finkok.com/cancel\" xmlns:s0=\"apps.services.soap.core.views\" targetNamespace=\"http://facturacion.finkok.com/cancel\" name=\"Application\"><wsdl:types><xs:schema targetNamespace=\"apps.services.soap.core.views\" elementFormDefault=\"qualified\"><xs:complexType name=\"Folio\"><xs:sequence><xs:element name=\"EstatusUUID\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"UUID\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"EstatusCancelacion\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType><xs:complexType name=\"FolioArray\"><xs:sequence><xs:element name=\"Folio\" type=\"s0:Folio\" minOccurs=\"0\" maxOccurs=\"unbounded\" nillable=\"true\"/></xs:sequence></xs:complexType><xs:complexType name=\"CancelaCFDResult\"><xs:sequence><xs:element name=\"Folios\" type=\"s0:FolioArray\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"Acuse\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"Fecha\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"RfcEmisor\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"CodEstatus\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType><xs:complexType name=\"Acuse\"><xs:sequence><xs:element name=\"CodigoEstatus\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"EsCancelable\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"Estado\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"EstatusCancelacion\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"ValidacionEFOS\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType><xs:complexType name=\"AcuseSATEstatus\"><xs:sequence><xs:element name=\"sat\" type=\"s0:Acuse\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"error\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType><xs:complexType name=\"UUID\"><xs:attribute name=\"UUID\" type=\"xs:string\"/><xs:attribute name=\"Motivo\" type=\"xs:string\"/><xs:attribute name=\"FolioSustitucion\" type=\"xs:string\"/></xs:complexType><xs:complexType name=\"UUIDArray\"><xs:sequence><xs:element name=\"UUID\" type=\"s0:UUID\" minOccurs=\"0\" maxOccurs=\"unbounded\"/></xs:sequence></xs:complexType></xs:schema><xs:schema targetNamespace=\"http://facturacion.finkok.com/cancel\" elementFormDefault=\"qualified\"><xs:import namespace=\"apps.services.soap.core.views\"/><xs:element name=\"cancel\"><xs:complexType><xs:sequence><xs:element name=\"UUIDS\" type=\"s0:UUIDArray\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"username\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"password\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"taxpayer_id\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"cer\" type=\"xs:base64Binary\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"key\" type=\"xs:base64Binary\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"store_pending\" type=\"xs:boolean\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element><xs:element name=\"cancelResponse\"><xs:complexType><xs:sequence><xs:element name=\"cancelResult\" type=\"s0:CancelaCFDResult\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element><xs:element name=\"get_sat_status\"><xs:complexType><xs:sequence><xs:element name=\"username\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"password\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"taxpayer_id\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"rtaxpayer_id\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"uuid\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"total\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element><xs:element name=\"get_sat_statusResponse\"><xs:complexType><xs:sequence><xs:element name=\"get_sat_statusResult\" type=\"s0:AcuseSATEstatus\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element></xs:schema></wsdl:types><wsdl:message name=\"cancel\"><wsdl:part name=\"cancel\" element=\"tns:cancel\"/></wsdl:message><wsdl:message name=\"cancelResponse\"><wsdl:part name=\"cancelResponse\" element=\"tns:cancelResponse\"/></wsdl:message><wsdl:message name=\"get_sat_status\"><wsdl:part name=\"get_sat_status\" element=\"tns:get_sat_status\"/></wsdl:message><wsdl:message name=\"get_sat_statusResponse\"><wsdl:part name=\"get_sat_statusResponse\" element=\"tns:get_sat_statusResponse\"/></wsdl:message><wsdl:portType name=\"Application\"><wsdl:operation name=\"cancel\"><wsdl:input name=\"cancel\" message=\"tns:cancel\"/><wsdl:output name=\"cancelResponse\" message=\"tns:cancelResponse\"/></wsdl:operation><wsdl:operation name=\"get_sat_status\"><wsdl:input name=\"get_sat_status\" message=\"tns:get_sat_status\"/><wsdl:output name=\"get_sat_statusResponse\" message=\"tns:get_sat_statusResponse\"/></wsdl:operation></wsdl:portType><wsdl:binding name=\"Application\" type=\"tns:Application\"><soap:binding style=\"document\" transport=\"http://schemas.xmlsoap.org/soap/http\"/><wsdl:operation name=\"cancel\"><soap:operation soapAction=\"cancel\" style=\"document\"/><wsdl:input name=\"cancel\"><soap:body use=\"literal\"/></wsdl:input><wsdl:output name=\"cancelResponse\"><soap:body use=\"literal\"/></wsdl:output></wsdl:operation><wsdl:operation name=\"get_sat_status\"><soap:operation soapAction=\"get_sat_status\" style=\"document\"/><wsdl:input name=\"get_sat_status\"><soap:body use=\"literal\"/></wsdl:input><wsdl:output name=\"get_sat_statusResponse\"><soap:body use=\"literal\"/></wsdl:output></wsdl:operation></wsdl:binding><wsdl:service name=\"CancelSOAP\"><wsdl:port name=\"Application\" binding=\"tns:Application\"><soap:address location=\"{{ service.url }}/servicios/soap/cancel\"/></wsdl:port></wsdl:service></wsdl:definitions>\n",
+                  "contentType": "text/xml; charset=utf-8"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-servicios-soap-utilities-wsdl",
+          "name": "WSDL de utilidades",
+          "description": "Descriptor SOAP para clientes (zeep, node-soap, SoapClient de PHP). La dirección apunta a esta simulación.",
+          "enabled": true,
+          "method": "GET",
+          "path": "/servicios/soap/utilities.wsdl",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "WSDL",
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "text",
+                  "content": "<?xml version='1.0' encoding='UTF-8'?>\n<wsdl:definitions xmlns:wsdl=\"http://schemas.xmlsoap.org/wsdl/\" xmlns:soap=\"http://schemas.xmlsoap.org/wsdl/soap/\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:tns=\"http://facturacion.finkok.com/utilities\" xmlns:s0=\"apps.services.soap.core.views\" targetNamespace=\"http://facturacion.finkok.com/utilities\" name=\"Application\"><wsdl:types><xs:schema targetNamespace=\"apps.services.soap.core.views\" elementFormDefault=\"qualified\"><xs:complexType name=\"DatetimeResult\"><xs:sequence><xs:element name=\"datetime\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"error\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:schema><xs:schema targetNamespace=\"http://facturacion.finkok.com/utilities\" elementFormDefault=\"qualified\"><xs:import namespace=\"apps.services.soap.core.views\"/><xs:element name=\"datetime\"><xs:complexType><xs:sequence><xs:element name=\"username\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/><xs:element name=\"password\" type=\"xs:string\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element><xs:element name=\"datetimeResponse\"><xs:complexType><xs:sequence><xs:element name=\"datetimeResult\" type=\"s0:DatetimeResult\" minOccurs=\"0\" nillable=\"true\"/></xs:sequence></xs:complexType></xs:element></xs:schema></wsdl:types><wsdl:message name=\"datetime\"><wsdl:part name=\"datetime\" element=\"tns:datetime\"/></wsdl:message><wsdl:message name=\"datetimeResponse\"><wsdl:part name=\"datetimeResponse\" element=\"tns:datetimeResponse\"/></wsdl:message><wsdl:portType name=\"Application\"><wsdl:operation name=\"datetime\"><wsdl:input name=\"datetime\" message=\"tns:datetime\"/><wsdl:output name=\"datetimeResponse\" message=\"tns:datetimeResponse\"/></wsdl:operation></wsdl:portType><wsdl:binding name=\"Application\" type=\"tns:Application\"><soap:binding style=\"document\" transport=\"http://schemas.xmlsoap.org/soap/http\"/><wsdl:operation name=\"datetime\"><soap:operation soapAction=\"datetime\" style=\"document\"/><wsdl:input name=\"datetime\"><soap:body use=\"literal\"/></wsdl:input><wsdl:output name=\"datetimeResponse\"><soap:body use=\"literal\"/></wsdl:output></wsdl:operation></wsdl:binding><wsdl:service name=\"UtilitiesSOAP\"><wsdl:port name=\"Application\" binding=\"tns:Application\"><soap:address location=\"{{ service.url }}/servicios/soap/utilities\"/></wsdl:port></wsdl:service></wsdl:definitions>\n",
+                  "contentType": "text/xml; charset=utf-8"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

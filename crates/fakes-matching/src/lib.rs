@@ -448,7 +448,11 @@ impl CompiledEndpoint {
             .iter()
             .zip(&self.scenarios)
             .filter(|(s, _)| s.enabled)
-            .find(|(s, c)| scenario_matches(s, c, req, vars))
+            .find(|(s, c)| {
+                scenario_matches(s, c, req, vars)
+                    // Probabilidad: con reglas cumplidas, se usa solo una fracción de las veces.
+                    && s.probability.is_none_or(|p| fastrand::f64() < p)
+            })
             .map(|(s, _)| (s, SelectionReason::Rules))
     }
 }
@@ -486,6 +490,7 @@ pub fn rule_actual(
         RuleSource::Path => req.params.get(&rule.key).and_then(|v| s(v)),
         RuleSource::Method => s(&req.method),
         RuleSource::Variable => vars.get(&rule.key).and_then(|v| s(v)),
+        RuleSource::CallCount => Some(Value::from(req.call_number)),
         RuleSource::Body => {
             if rule.key.trim().is_empty() {
                 if req.raw_body.is_empty() {

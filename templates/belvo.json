@@ -1,0 +1,361 @@
+{
+  "format": "fake-services",
+  "formatVersion": 1,
+  "services": [
+    {
+      "schemaVersion": 1,
+      "id": "belvo",
+      "name": "Belvo",
+      "description": "Open finance (sandbox). Links persistentes; cuentas y transacciones generadas. Usa el usuario «bnk_error» para simular credenciales inválidas.",
+      "upstreamUrl": "https://sandbox.belvo.com",
+      "prefix": "/belvo",
+      "auth": {
+        "type": "basic"
+      },
+      "endpoints": [
+        {
+          "id": "post-api-links",
+          "name": "Registrar link",
+          "method": "POST",
+          "path": "/api/links/",
+          "scenarios": [
+            {
+              "id": "credenciales-invalidas",
+              "name": "Credenciales inválidas",
+              "rules": [
+                {
+                  "source": "body",
+                  "key": "username",
+                  "operator": "equals",
+                  "value": "bnk_error"
+                }
+              ],
+              "response": {
+                "status": 400,
+                "body": {
+                  "type": "json",
+                  "content": [
+                    {
+                      "code": "invalid",
+                      "message": "Invalid credentials provided to login to the institution",
+                      "request_id": "{{ random_hex(32) }}"
+                    }
+                  ]
+                }
+              }
+            },
+            {
+              "id": "ok",
+              "name": "Link creado",
+              "rules": [],
+              "resource": {
+                "collection": "links",
+                "operation": "create",
+                "recordId": "{{ uuid() }}",
+                "data": {
+                  "institution": "{{ request.body.institution }}",
+                  "access_mode": "{{ request.body.access_mode or 'single' }}",
+                  "status": "valid",
+                  "created_at": "{{ now() }}",
+                  "external_id": "{{ request.body.external_id }}",
+                  "institution_user_id": "{{ random_hex(20) }}",
+                  "refresh_rate": null,
+                  "created_by": "{{ uuid() }}"
+                }
+              },
+              "response": {
+                "status": 201,
+                "body": {
+                  "type": "json",
+                  "content": "{{ resource }}"
+                }
+              }
+            }
+          ],
+          "request": {
+            "body": {
+              "kind": "json",
+              "required": true,
+              "example": {
+                "institution": "erebor_mx_retail",
+                "username": "bnk100",
+                "password": "full",
+                "access_mode": "single"
+              }
+            }
+          }
+        },
+        {
+          "id": "get-api-links",
+          "name": "Listar links",
+          "method": "GET",
+          "path": "/api/links/",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Página",
+              "rules": [],
+              "resource": {
+                "collection": "links",
+                "operation": "list"
+              },
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": {
+                    "count": "{{ resources | length }}",
+                    "next": null,
+                    "previous": null,
+                    "results": "{{ resources }}"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-api-links-id",
+          "name": "Consultar link",
+          "method": "GET",
+          "path": "/api/links/{id}/",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Link",
+              "rules": [],
+              "resource": {
+                "collection": "links",
+                "operation": "get",
+                "recordId": "{{ request.params.id }}",
+                "onMissing": {
+                  "status": 404,
+                  "body": {
+                    "type": "json",
+                    "content": [
+                      {
+                        "code": "not_found",
+                        "message": "Not found.",
+                        "request_id": "{{ random_hex(32) }}"
+                      }
+                    ]
+                  }
+                }
+              },
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": "{{ resource }}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "delete-api-links-id",
+          "name": "Eliminar link",
+          "method": "DELETE",
+          "path": "/api/links/{id}/",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Eliminado",
+              "rules": [],
+              "resource": {
+                "collection": "links",
+                "operation": "delete",
+                "recordId": "{{ request.params.id }}",
+                "onMissing": {
+                  "status": 404,
+                  "body": {
+                    "type": "json",
+                    "content": [
+                      {
+                        "code": "not_found",
+                        "message": "Not found.",
+                        "request_id": "{{ random_hex(32) }}"
+                      }
+                    ]
+                  }
+                }
+              },
+              "response": {
+                "status": 204
+              }
+            }
+          ]
+        },
+        {
+          "id": "post-api-accounts",
+          "name": "Obtener cuentas",
+          "method": "POST",
+          "path": "/api/accounts/",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Cuentas",
+              "rules": [],
+              "resource": {
+                "collection": "links",
+                "operation": "get",
+                "recordId": "{{ request.body.link }}",
+                "onMissing": {
+                  "status": 400,
+                  "body": {
+                    "type": "json",
+                    "content": [
+                      {
+                        "code": "invalid",
+                        "message": "Link does not exist",
+                        "field": "link",
+                        "request_id": "{{ random_hex(32) }}"
+                      }
+                    ]
+                  }
+                }
+              },
+              "response": {
+                "status": 201,
+                "body": {
+                  "type": "json",
+                  "content": [
+                    {
+                      "id": "{{ uuid() }}",
+                      "link": "{{ request.body.link }}",
+                      "category": "CHECKING_ACCOUNT",
+                      "type": "Cuentas de efectivo",
+                      "name": "Cuenta Perfiles- M.N. - MXN-666",
+                      "number": "{{ random_int(1000000000, 9999999999) }}",
+                      "currency": "MXN",
+                      "balance": {
+                        "current": "{{ random_float(1000, 90000) }}",
+                        "available": "{{ random_float(1000, 90000) }}"
+                      },
+                      "collected_at": "{{ now() }}",
+                      "institution": {
+                        "name": "erebor_mx_retail",
+                        "type": "bank"
+                      }
+                    },
+                    {
+                      "id": "{{ uuid() }}",
+                      "link": "{{ request.body.link }}",
+                      "category": "CREDIT_CARD",
+                      "type": "Tarjetas de crédito",
+                      "name": "Tarjeta Oro",
+                      "number": "{{ random_int(1000, 9999) }}",
+                      "currency": "MXN",
+                      "balance": {
+                        "current": "{{ random_float(100, 20000) }}",
+                        "available": "{{ random_float(100, 20000) }}"
+                      },
+                      "collected_at": "{{ now() }}",
+                      "institution": {
+                        "name": "erebor_mx_retail",
+                        "type": "bank"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "request": {
+            "body": {
+              "kind": "json",
+              "required": true,
+              "example": {
+                "link": "<id del link>"
+              }
+            }
+          }
+        },
+        {
+          "id": "post-api-transactions",
+          "name": "Obtener transacciones",
+          "method": "POST",
+          "path": "/api/transactions/",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Transacciones",
+              "rules": [],
+              "resource": {
+                "collection": "links",
+                "operation": "get",
+                "recordId": "{{ request.body.link }}",
+                "onMissing": {
+                  "status": 400,
+                  "body": {
+                    "type": "json",
+                    "content": [
+                      {
+                        "code": "invalid",
+                        "message": "Link does not exist",
+                        "field": "link",
+                        "request_id": "{{ random_hex(32) }}"
+                      }
+                    ]
+                  }
+                }
+              },
+              "response": {
+                "status": 201,
+                "body": {
+                  "type": "json",
+                  "content": [
+                    {
+                      "id": "{{ uuid() }}",
+                      "category": "Food & Groceries",
+                      "type": "OUTFLOW",
+                      "amount": "{{ random_float(50, 2500) }}",
+                      "currency": "MXN",
+                      "description": "SUPERMERCADO {{ random_int(100, 999) }}",
+                      "value_date": "{{ now('%Y-%m-%d') }}",
+                      "status": "PROCESSED",
+                      "collected_at": "{{ now() }}"
+                    },
+                    {
+                      "id": "{{ uuid() }}",
+                      "category": "Income & Payments",
+                      "type": "INFLOW",
+                      "amount": "{{ random_float(5000, 40000) }}",
+                      "currency": "MXN",
+                      "description": "NOMINA",
+                      "value_date": "{{ now('%Y-%m-%d') }}",
+                      "status": "PROCESSED",
+                      "collected_at": "{{ now() }}"
+                    },
+                    {
+                      "id": "{{ uuid() }}",
+                      "category": "Transport & Travel",
+                      "type": "OUTFLOW",
+                      "amount": "{{ random_float(30, 800) }}",
+                      "currency": "MXN",
+                      "description": "UBER *TRIP",
+                      "value_date": "{{ now('%Y-%m-%d') }}",
+                      "status": "PROCESSED",
+                      "collected_at": "{{ now() }}"
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "request": {
+            "body": {
+              "kind": "json",
+              "required": true,
+              "example": {
+                "link": "<id del link>",
+                "date_from": "2026-01-01",
+                "date_to": "2026-01-31"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

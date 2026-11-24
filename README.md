@@ -11,8 +11,8 @@ COPOMEX, Stripe, AWS S3…) con endpoints, escenarios de error, retrasos y workf
 asíncronos con webhooks.
 
 Está pensado **para agentes de IA primero**: todo lo que se puede hacer desde la interfaz se
-puede hacer desde la API de administración (y, en la fase 3, desde un servidor MCP), sin
-escribir código.
+puede hacer desde el servidor MCP o la API de administración, sin escribir código. Un agente
+puede analizar tu proyecto, detectar qué proveedores usa, instalar sus simulaciones y probarlas.
 
 - Un solo ejecutable con servidor HTTP, motor de simulación, administración e interfaz web
   (se usa desde el navegador).
@@ -25,57 +25,78 @@ escribir código.
 |---|---|---|
 | 1 | Espacios de trabajo, servicios, servidor central, endpoints, matching, respuestas dinámicas, historial, interfaz | ✅ Implementada |
 | 2 | Motor de workflows: esperas, condiciones, webhooks con URLs dinámicas, reintentos, ejecuciones durables con línea de tiempo | ✅ Implementada |
-| 3 | Importar y exportar servicios, espacios y workflows (JSON) | ✅ Implementada |
-| 3 | Servidor MCP, importación de OpenAPI y Postman | Pendiente (la API REST ya existe) |
-| 4 | Editor visual de workflows, plantillas de proveedores, recursos persistentes | Pendiente |
+| 3 | Servidor MCP (stdio y HTTP), importación de OpenAPI/Swagger y Postman, importar y exportar, detección de integraciones | ✅ Implementada |
+| 4 | Editor visual de workflows, plantillas de proveedores, recursos persistentes, escenarios avanzados (probabilidad, número de llamada) | ✅ Implementada |
 
 ## Instalar
 
 Fake Services es **un solo programa** (`fakes`) con el servidor, el motor y la interfaz web.
-No necesita Docker, Node, bases de datos ni conexión a Internet. Al ejecutarlo se abre la
-interfaz en tu navegador.
+Una vez compilado no necesita Docker, Node, bases de datos ni conexión a Internet. Al ejecutarlo
+se abre la interfaz en tu navegador.
 
-### Desde un paquete (sin compilar)
+No hay paquetes precompilados: se instala descargando el repositorio y compilándolo. Los
+scripts hacen todo (compilar la interfaz y el binario, e instalar) con un solo comando.
 
-Descarga el paquete de tu sistema desde *Releases*:
+### Requisitos para compilar
 
-| Sistema | Paquete | Instalar |
+| Herramienta | Versión | Cómo obtenerla |
 |---|---|---|
-| Ubuntu, Debian y derivadas | `fake-services_<versión>_amd64.deb` | `sudo apt install ./fake-services_*.deb` |
-| Fedora, RHEL y derivadas | `fake-services-<versión>.x86_64.rpm` | `sudo dnf install ./fake-services-*.rpm` |
-| Cualquier Linux (sin sudo) | `fake-services-<versión>-linux-x86_64.tar.gz` | descomprime y ejecuta `./instalar.sh` |
-| Windows 10/11 | `fake-services-<versión>-windows-x86_64.zip` | descomprime y haz doble clic en `instalar.cmd` |
+| Rust | estable | <https://rustup.rs> (en Windows, el toolchain MSVC con «Desarrollo para el escritorio con C++») |
+| Node.js | 20 o superior | <https://nodejs.org> |
+| pnpm | 9 o superior | `npm install -g pnpm` |
+| Git | cualquiera | para descargar el repositorio |
 
-Después abre **Fake Services** desde el menú de aplicaciones (o ejecuta `fakes`).
-
-### Desde el código
-
-Requiere Rust, Node.js 20+ y pnpm:
+### Linux
 
 ```bash
-./scripts/install.sh          # Linux: compila e instala en ~/.local (sin sudo)
-./scripts/build.sh --paquetes # genera .deb, .rpm y .tar.gz en dist/
+git clone <url-del-repositorio> fake-services
+cd fake-services
+./scripts/install.sh
 ```
+
+Instala en tu carpeta personal (`~/.local/bin/fakes`), sin `sudo`, y crea el acceso
+**Fake Services** en el menú de aplicaciones.
+
+### Windows 10/11 (PowerShell)
 
 ```powershell
-.\scripts\install.ps1         # Windows: compila e instala para tu usuario
-.\scripts\build.ps1 -Paquete  # genera el .zip en dist\
+git clone <url-del-repositorio> fake-services
+cd fake-services
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 ```
 
-**Actualizar es usar el mismo instalador.** `instalar.sh` / `instalar.cmd` detecta la versión
-instalada y la reemplaza:
+Instala para tu usuario (`%LOCALAPPDATA%\Programs\FakeServices`), agrega `fakes` al PATH y crea
+el acceso **Fake Services** en el menú Inicio. No requiere permisos de administrador.
+
+### Actualizar
+
+```bash
+git pull
+./scripts/install.sh            # Windows: .\scripts\install.ps1
+```
+
+Es el mismo comando que para instalar. El instalador detecta la versión instalada y la reemplaza:
 
 - Si Fake Services está corriendo, lo detiene de forma ordenada, instala y lo vuelve a iniciar en
   segundo plano.
-- Limpia restos de instalaciones anteriores (app de escritorio, rutas viejas) y actualiza el
-  inicio automático.
-- Si encuentra además un paquete del sistema (`.deb`/`.rpm`), ofrece quitarlo para que quede una
-  sola instalación.
+- Limpia restos de instalaciones anteriores y actualiza el inicio automático.
 - Tus espacios de trabajo, historial y ejecuciones se conservan; la base de datos se migra sola.
 
-Con los paquetes `.deb`/`.rpm`, `apt install`/`dnf install` de la versión nueva también actualiza.
+### Desinstalar
 
-Para desinstalar: `./instalar.sh --desinstalar` o `instalar.ps1 -Desinstalar`.
+```bash
+./scripts/install.sh --desinstalar      # Windows: .\scripts\install.ps1 -Desinstalar
+```
+
+### Generar paquetes para otras máquinas (opcional)
+
+Si quieres distribuirlo a equipos sin herramientas de desarrollo, compílalo una vez y lleva el
+paquete:
+
+```bash
+./scripts/build.sh --paquetes   # Linux: dist/*.deb, dist/*.rpm y dist/*.tar.gz (con instalar.sh)
+.\scripts\build.ps1 -Paquete    # Windows: dist\*.zip (con instalar.cmd)
+```
 
 ## Uso
 
@@ -89,9 +110,12 @@ fakes token        # token de la API para agentes y scripts
 - Interfaz: `http://127.0.0.1:4010` · Simulaciones: `http://127.0.0.1:4000/<servicio>`
 - En **Ajustes → Iniciar con el sistema**, Fake Services arranca en segundo plano al iniciar
   sesión.
-- En **Importar y exportar** guardas tus servicios (con endpoints, escenarios y workflows) en un
-  archivo JSON y los cargas en otra instalación. También desde la API: `GET /api/v1/export` y
-  `POST /api/v1/import`.
+- En **Plantillas** instalas con un clic un proveedor listo para usar (ver abajo) o analizas la
+  carpeta de tu proyecto para saber qué servicios externos usa.
+- En **Importar y exportar** guardas tus servicios (con endpoints, escenarios, workflows y, si
+  quieres, sus recursos) en un archivo JSON y los cargas en otra instalación. Ahí mismo importas
+  un **OpenAPI/Swagger** (JSON o YAML) o una **colección de Postman**: cada respuesta documentada
+  se convierte en un escenario.
 
 Prueba el servicio de ejemplo:
 
@@ -111,6 +135,54 @@ curl -i -X POST http://127.0.0.1:4000/ejemplo/documentos/contrato-1/firmar \
 
 El header `x-fakes-executions` trae el id de la ejecución; síguela en *Ejecuciones*.
 
+## Conectar un agente (MCP)
+
+Fake Services incluye un servidor [MCP](https://modelcontextprotocol.io) con más de 45
+herramientas: crear servicios, endpoints y workflows, instalar plantillas, importar OpenAPI,
+probar endpoints, leer el historial y las ejecuciones, y manejar recursos. Las mismas reglas de
+validación que la interfaz: nada de código generado.
+
+**Por stdio** (recomendado). Si Fake Services ya está corriendo, `fakes mcp` se conecta a esa
+instancia; si no, arranca una dentro del mismo proceso.
+
+```bash
+claude mcp add fake-services -- fakes mcp
+```
+
+Para otros clientes (Claude Desktop, Cursor, VS Code…), el comando es `fakes` con el
+argumento `mcp`:
+
+```json
+{ "mcpServers": { "fake-services": { "command": "fakes", "args": ["mcp"] } } }
+```
+
+**Por HTTP**: `http://127.0.0.1:4010/mcp` con el header `Authorization: Bearer <token>`
+(el token se obtiene con `fakes token`).
+
+```bash
+claude mcp add --transport http fake-services http://127.0.0.1:4010/mcp \
+  --header "Authorization: Bearer $(fakes token)"
+```
+
+Un flujo típico para el agente: `detectar_integraciones_proyecto` → `instalar_plantilla` o
+`importar_openapi` → `obtener_estado` (URLs) → `probar_endpoint` → `listar_solicitudes` /
+`listar_ejecuciones`.
+
+## Plantillas de proveedores
+
+| Plantilla | Qué simula |
+|---|---|
+| `mifiel` | Firma electrónica: documentos persistentes, firma asíncrona con webhook al `callback_url`, rechazo forzable, PDF firmado |
+| `finkok` | PAC CFDI 4.0 (SOAP): timbrado, cancelación, estatus y utilidades, con sus WSDL y códigos de error |
+| `stripe` | Clientes e intents de pago (form-urlencoded), tarjetas rechazadas y webhook `payment_intent.succeeded` |
+| `sendgrid` | `POST /v3/mail/send`: guarda cada correo para revisarlo y envía el evento `delivered` |
+| `aws-s3` | Objetos reales (binarios) con PUT, GET, HEAD, DELETE y ListObjectsV2 en estilo path |
+| `belvo` | Links persistentes, cuentas y transacciones; credenciales inválidas con el usuario `bnk_error` |
+| `copomex` | Códigos postales, estados y municipios de México |
+
+Se instalan desde **Plantillas**, con `POST /api/v1/templates/<id>/install` o con la herramienta
+MCP `instalar_plantilla`. Después puedes editarlas como cualquier otro servicio.
+
 ## Conceptos
 
 - **Espacio de trabajo**: una carpeta con la configuración. Puede vivir dentro del repositorio
@@ -121,11 +193,17 @@ El header `x-fakes-executions` trae el id de la ejecución; síguela en *Ejecuci
   query, body con JSON Schema) y una lista ordenada de **escenarios**.
 - **Escenario**: reglas de coincidencia y la respuesta a devolver. Gana el primero cuyas reglas se
   cumplan. Puedes forzar uno desde la interfaz o con el header `x-fakes-scenario`. Un escenario
-  puede iniciar **workflows**.
+  puede iniciar **workflows**, aplicar solo un porcentaje de las veces (fallas intermitentes) o
+  depender del **número de llamada** (por ejemplo, fallar las dos primeras y responder bien a la
+  tercera).
+- **Recurso**: datos persistentes de un servicio, en colecciones (`documents`, `objects`,
+  `customers`…). Un escenario o un paso de workflow puede crearlos, leerlos, actualizarlos o
+  borrarlos: lo que un `POST` crea, un `GET` posterior lo devuelve. Se ven y editan en la pestaña
+  **Recursos** del servicio.
 - **Workflow**: pasos asíncronos sin código: esperar, solicitud HTTP (webhook) con reintentos,
-  condiciones con saltos, variables, emitir eventos, ejecutar otro workflow, simular un error o
-  finalizar. Se inicia al recibir la solicitud, al completar la respuesta, manualmente o cada
-  cierto tiempo.
+  condiciones con saltos, variables, recursos, emitir eventos, ejecutar otro workflow, simular un
+  error o finalizar. Se edita como lista o como **diagrama** (arrastrando flechas entre pasos). Se
+  inicia al recibir la solicitud, al completar la respuesta, manualmente o cada cierto tiempo.
 - **Ejecución**: cada corrida de un workflow, con contexto aislado y línea de tiempo. Se guarda en
   SQLite tras cada paso: si cierras la app, al volver a abrirla continúa donde quedó.
 
@@ -140,7 +218,9 @@ Headers y bodies admiten plantillas seguras (sin ejecución de código):
   "signers": "{{ request.body.signers }}",
   "created_at": "{{ now() }}",
   "folio": "{{ uuid() }}",
-  "rfc": "{{ fake('rfc') }}"
+  "rfc": "{{ fake('rfc') }}",
+  "intento": "{{ request.callNumber }}",
+  "documento": "{{ resource }}"
 }
 ```
 
@@ -150,7 +230,7 @@ Si un texto es solo `{{ expresión }}` se conserva el tipo (número, lista, obje
 ## Documentación
 
 - [Configuración y plantillas](docs/configuracion.md)
-- [API REST de administración](docs/api.md)
+- [API REST de administración y MCP](docs/api.md)
 - [Arquitectura y decisiones técnicas](docs/arquitectura.md)
 - [Marca](docs/marca.md)
 
@@ -159,6 +239,7 @@ Si un texto es solo `{{ expresión }}` se conserva el tipo (número, lista, obje
 ```bash
 cargo test                 # pruebas del núcleo
 cargo run -p fakes-cli -- serve --sin-navegador   # núcleo + API en :4010
+cargo run -p fakes-cli -- mcp                      # servidor MCP por stdio
 cd ui && pnpm dev          # interfaz con recarga en caliente en :5173 (proxy a :4010)
 ```
 

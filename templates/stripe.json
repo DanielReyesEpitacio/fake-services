@@ -1,0 +1,397 @@
+{
+  "format": "fake-services",
+  "formatVersion": 1,
+  "services": [
+    {
+      "schemaVersion": 1,
+      "id": "stripe",
+      "name": "Stripe",
+      "description": "Pagos (API v1, cuerpos form-urlencoded). Clientes e intents de pago persistentes. Tarjetas de prueba: pm_card_visa aprueba; pm_card_chargeDeclined o un monto terminado en 02 rechaza. Si defines la variable WEBHOOK_URL, se envía payment_intent.succeeded al confirmar.",
+      "upstreamUrl": "https://api.stripe.com",
+      "prefix": "/stripe",
+      "variables": {
+        "WEBHOOK_URL": ""
+      },
+      "auth": {
+        "type": "bearer"
+      },
+      "endpoints": [
+        {
+          "id": "post-v1-customers",
+          "name": "Crear cliente",
+          "method": "POST",
+          "path": "/v1/customers",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Cliente",
+              "rules": [],
+              "resource": {
+                "collection": "customers",
+                "operation": "create",
+                "recordId": "cus_{{ random_hex(14) }}",
+                "data": {
+                  "object": "customer",
+                  "email": "{{ request.body.email }}",
+                  "name": "{{ request.body.name }}",
+                  "description": "{{ request.body.description }}",
+                  "created": "{{ now('%s') | int }}",
+                  "livemode": false,
+                  "metadata": {}
+                }
+              },
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": "{{ resource }}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-v1-customers",
+          "name": "Listar clientes",
+          "method": "GET",
+          "path": "/v1/customers",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Lista",
+              "rules": [],
+              "resource": {
+                "collection": "customers",
+                "operation": "list"
+              },
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": {
+                    "object": "list",
+                    "url": "/v1/customers",
+                    "has_more": false,
+                    "data": "{{ resources }}"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-v1-customers-id",
+          "name": "Consultar cliente",
+          "method": "GET",
+          "path": "/v1/customers/{id}",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Cliente",
+              "rules": [],
+              "resource": {
+                "collection": "customers",
+                "operation": "get",
+                "recordId": "{{ request.params.id }}",
+                "onMissing": {
+                  "status": 404,
+                  "body": {
+                    "type": "json",
+                    "content": {
+                      "error": {
+                        "type": "invalid_request_error",
+                        "code": "resource_missing",
+                        "message": "No such customer: '{{ request.params.id }}'"
+                      }
+                    }
+                  }
+                }
+              },
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": "{{ resource }}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "delete-v1-customers-id",
+          "name": "Eliminar cliente",
+          "method": "DELETE",
+          "path": "/v1/customers/{id}",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Eliminado",
+              "rules": [],
+              "resource": {
+                "collection": "customers",
+                "operation": "delete",
+                "recordId": "{{ request.params.id }}",
+                "onMissing": {
+                  "status": 404,
+                  "body": {
+                    "type": "json",
+                    "content": {
+                      "error": {
+                        "type": "invalid_request_error",
+                        "code": "resource_missing",
+                        "message": "No such customer: '{{ request.params.id }}'"
+                      }
+                    }
+                  }
+                }
+              },
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": {
+                    "id": "{{ request.params.id }}",
+                    "object": "customer",
+                    "deleted": true
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "post-v1-payment-intents",
+          "name": "Crear intent de pago",
+          "method": "POST",
+          "path": "/v1/payment_intents",
+          "scenarios": [
+            {
+              "id": "monto-faltante",
+              "name": "Falta amount",
+              "rules": [
+                {
+                  "source": "body",
+                  "key": "amount",
+                  "operator": "notExists"
+                }
+              ],
+              "response": {
+                "status": 400,
+                "body": {
+                  "type": "json",
+                  "content": {
+                    "error": {
+                      "type": "invalid_request_error",
+                      "code": "parameter_missing",
+                      "message": "Missing required param: amount."
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "ok",
+              "name": "Intent creado",
+              "rules": [],
+              "resource": {
+                "collection": "payment_intents",
+                "operation": "create",
+                "recordId": "pi_{{ random_hex(24) }}",
+                "data": {
+                  "object": "payment_intent",
+                  "amount": "{{ request.body.amount | int }}",
+                  "currency": "{{ request.body.currency or 'mxn' }}",
+                  "customer": "{{ request.body.customer }}",
+                  "payment_method": "{{ request.body.payment_method }}",
+                  "client_secret": "pi_secret_{{ random_hex(24) }}",
+                  "status": "requires_confirmation",
+                  "created": "{{ now('%s') | int }}",
+                  "livemode": false
+                }
+              },
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": "{{ resource }}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "get-v1-payment-intents-id",
+          "name": "Consultar intent",
+          "method": "GET",
+          "path": "/v1/payment_intents/{id}",
+          "scenarios": [
+            {
+              "id": "ok",
+              "name": "Intent",
+              "rules": [],
+              "resource": {
+                "collection": "payment_intents",
+                "operation": "get",
+                "recordId": "{{ request.params.id }}",
+                "onMissing": {
+                  "status": 404,
+                  "body": {
+                    "type": "json",
+                    "content": {
+                      "error": {
+                        "type": "invalid_request_error",
+                        "code": "resource_missing",
+                        "message": "No such payment_intent: '{{ request.params.id }}'"
+                      }
+                    }
+                  }
+                }
+              },
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": "{{ resource }}"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "post-v1-payment-intents-id-confirm",
+          "name": "Confirmar intent",
+          "method": "POST",
+          "path": "/v1/payment_intents/{id}/confirm",
+          "scenarios": [
+            {
+              "id": "rechazada",
+              "name": "Tarjeta rechazada",
+              "ruleMode": "any",
+              "rules": [
+                {
+                  "source": "body",
+                  "key": "payment_method",
+                  "operator": "equals",
+                  "value": "pm_card_chargeDeclined"
+                },
+                {
+                  "source": "header",
+                  "key": "x-fakes-scenario",
+                  "operator": "equals",
+                  "value": "rechazada"
+                }
+              ],
+              "response": {
+                "status": 402,
+                "body": {
+                  "type": "json",
+                  "content": {
+                    "error": {
+                      "type": "card_error",
+                      "code": "card_declined",
+                      "message": "Your card was declined."
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "id": "ok",
+              "name": "Pago exitoso",
+              "rules": [],
+              "resource": {
+                "collection": "payment_intents",
+                "operation": "update",
+                "recordId": "{{ request.params.id }}",
+                "data": {
+                  "status": "succeeded",
+                  "amount_received": "{{ request.body.amount or 0 }}"
+                },
+                "onMissing": {
+                  "status": 404,
+                  "body": {
+                    "type": "json",
+                    "content": {
+                      "error": {
+                        "type": "invalid_request_error",
+                        "code": "resource_missing",
+                        "message": "No such payment_intent: '{{ request.params.id }}'"
+                      }
+                    }
+                  }
+                }
+              },
+              "workflows": [
+                {
+                  "workflowId": "webhook-pago",
+                  "when": "responseSent"
+                }
+              ],
+              "response": {
+                "status": 200,
+                "body": {
+                  "type": "json",
+                  "content": "{{ resource }}"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "workflows": [
+        {
+          "id": "webhook-pago",
+          "name": "Webhook payment_intent.succeeded",
+          "steps": [
+            {
+              "id": "hay-url",
+              "type": "condition",
+              "conditions": [
+                {
+                  "path": "vars.WEBHOOK_URL",
+                  "operator": "notEquals",
+                  "value": ""
+                }
+              ],
+              "onFalse": "fin"
+            },
+            {
+              "id": "espera",
+              "type": "wait",
+              "durationMs": 1500
+            },
+            {
+              "id": "evento",
+              "type": "http",
+              "method": "POST",
+              "url": "{{ vars.WEBHOOK_URL }}",
+              "headers": {
+                "Stripe-Signature": "t={{ now('%s') }},v1={{ random_hex(64) }}"
+              },
+              "body": {
+                "type": "json",
+                "content": {
+                  "id": "evt_{{ random_hex(24) }}",
+                  "object": "event",
+                  "type": "payment_intent.succeeded",
+                  "created": "{{ now('%s') | int }}",
+                  "data": {
+                    "object": "{{ response.body }}"
+                  }
+                }
+              },
+              "retry": {
+                "maxAttempts": 3,
+                "backoffMs": 2000
+              }
+            },
+            {
+              "id": "fin",
+              "type": "end"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -15,7 +15,9 @@ use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, S
 use sqlx::{QueryBuilder, Row, Sqlite, SqlitePool};
 
 mod executions;
+mod resources;
 pub use executions::*;
+pub use resources::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {

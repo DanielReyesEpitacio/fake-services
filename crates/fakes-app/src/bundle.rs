@@ -44,6 +44,9 @@ pub struct Bundle {
     /// Archivos de `files/` (ruta relativa → contenido en base64).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub files: BTreeMap<String, String>,
+    /// Recursos simulados: servicio → colección → registros.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub resources: BTreeMap<String, BTreeMap<String, Vec<serde_json::Value>>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
@@ -58,6 +61,9 @@ pub struct ExportOptions {
     /// Incluir la carpeta `files/`.
     #[serde(default)]
     pub include_files: bool,
+    /// Incluir los recursos simulados guardados.
+    #[serde(default)]
+    pub include_resources: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema, Default)]
@@ -118,6 +124,8 @@ pub struct ImportReport {
     pub skipped: Vec<String>,
     pub renamed: Vec<Renamed>,
     pub files: usize,
+    /// Registros de recursos simulados importados.
+    pub resources: usize,
     pub endpoints: usize,
     pub workflows: usize,
     pub warnings: Vec<String>,
@@ -190,6 +198,35 @@ impl FakesApp {
             .filter(|s| opts.services.is_empty() || opts.services.contains(&s.id))
             .cloned()
             .collect();
+        let mut resources = BTreeMap::new();
+        if opts.include_resources {
+            for svc in &services {
+                let mut cols = BTreeMap::new();
+                for c in self
+                    .store
+                    .resource_collections(&a.workspace.id, &svc.id)
+                    .await?
+                {
+                    let records = self
+                        .store
+                        .resource_list(
+                            &a.workspace.id,
+                            &svc.id,
+                            &c.collection,
+                            fakes_store::LIST_LIMIT,
+                            0,
+                        )
+                        .await?
+                        .into_iter()
+                        .map(|r| r.data)
+                        .collect();
+                    cols.insert(c.collection, records);
+                }
+                if !cols.is_empty() {
+                    resources.insert(svc.id.clone(), cols);
+                }
+            }
+        }
         let mut files = BTreeMap::new();
         if opts.include_files {
             let root = a.dir.join(fakes_config::FILES_DIR);
@@ -208,6 +245,7 @@ impl FakesApp {
             }),
             services,
             files,
+            resources,
         })
     }
 
@@ -260,7 +298,7 @@ impl FakesApp {
             .await
     }
 
-    async fn import_merge(
+    pub(crate) async fn import_merge(
         &self,
         bundle: Bundle,
         on_conflict: OnConflict,
@@ -337,6 +375,35 @@ impl FakesApp {
         }
         for (target, bytes) in files {
             fakes_config::write_atomic(&target, &bytes)?;
+        }
+        // Recursos de los servicios importados (con su id final).
+        let ws_id = inner.active.workspace.id.clone();
+        for (svc_id, cols) in &bundle.resources {
+            if report.skipped.contains(svc_id) {
+                continue;
+            }
+            let target = report
+                .renamed
+                .iter()
+                .find(|r| &r.from == svc_id)
+                .map(|r| r.to.clone())
+                .unwrap_or_else(|| svc_id.clone());
+            if !inner.active.services.iter().any(|s| s.id == target) {
+                continue;
+            }
+            for (col, records) in cols {
+                for (n, rec) in records.iter().enumerate() {
+                    let id = rec
+                        .get("id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                        .unwrap_or_else(|| format!("{n}"));
+                    self.store
+                        .resource_put(&ws_id, &target, col, &id, rec)
+                        .await?;
+                    report.resources += 1;
+                }
+            }
         }
         sort_services(&mut inner.active.services);
         self.publish(&inner, true).await;

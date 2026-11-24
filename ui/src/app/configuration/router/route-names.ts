@@ -11,4 +11,5 @@ export const RouteNames = {
   executions: 'executions',
   execution: 'execution',
   transfer: 'transfer',
+  templates: 'templates',
 } as const
