@@ -201,9 +201,13 @@ MCP `instalar_plantilla`. Después puedes editarlas como cualquier otro servicio
   borrarlos: lo que un `POST` crea, un `GET` posterior lo devuelve. Se ven y editan en la pestaña
   **Recursos** del servicio.
 - **Workflow**: pasos asíncronos sin código: esperar, solicitud HTTP (webhook) con reintentos,
-  condiciones con saltos, variables, recursos, emitir eventos, ejecutar otro workflow, simular un
-  error o finalizar. Se edita como lista o como **diagrama** (arrastrando flechas entre pasos). Se
-  inicia al recibir la solicitud, al completar la respuesta, manualmente o cada cierto tiempo.
+  condiciones (sí/no), «dividir según» con varios casos, variables, recursos, emitir eventos,
+  ejecutar otro workflow, simular un error o finalizar. Se programa en un **editor de nodos**:
+  arrastras pasos desde la paleta y unes sus salidas con nombre («Éxito», «Fallo», «Sí», «No», cada
+  caso) con el siguiente paso; soltar una salida en un espacio vacío crea el paso conectado. Sobre el
+  diagrama puedes ver el recorrido de cualquier ejecución (pasos visitados, fallos y el paso en curso).
+  También se puede editar como lista. Se inicia al recibir la solicitud, al completar la respuesta,
+  manualmente o cada cierto tiempo.
 - **Ejecución**: cada corrida de un workflow, con contexto aislado y línea de tiempo. Se guarda en
   SQLite tras cada paso: si cierras la app, al volver a abrirla continúa donde quedó.
 

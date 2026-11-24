@@ -341,7 +341,7 @@ pub fn all() -> Vec<Tool> {
             |app: Arc<FakesApp>, a: ServiceRef| async move { app.list_workflows(&a.service_id).await }),
         tool("obtener_workflow", "Obtener workflow", "Definición completa de un workflow.", true,
             |app: Arc<FakesApp>, a: WorkflowRef| async move { app.get_workflow(&a.service_id, &a.workflow_id).await }),
-        tool("crear_workflow", "Crear workflow", "Crea un workflow (pasos: wait, http, condition, setVariables, emit, runWorkflow, resource, fail, end). Para iniciarlo desde un endpoint agrega {workflowId} a scenario.workflows.", false,
+        tool("crear_workflow", "Crear workflow", "Crea un workflow (pasos: wait, http, condition, switch, setVariables, emit, runWorkflow, resource, fail, end; cualquier paso acepta onError para continuar por su salida de error). Para iniciarlo desde un endpoint agrega {workflowId} a scenario.workflows.", false,
             |app: Arc<FakesApp>, a: CreateWorkflow| async move { app.create_workflow(&a.service_id, a.workflow).await }),
         tool("actualizar_workflow", "Actualizar workflow", "Modifica un workflow con JSON Merge Patch.", false,
             |app: Arc<FakesApp>, a: PatchWorkflow| async move { app.patch_workflow(&a.service_id, &a.workflow_id, a.changes).await }),

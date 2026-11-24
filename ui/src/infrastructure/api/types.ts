@@ -332,6 +332,15 @@ interface StepBase {
   id: string
   name?: string
   next?: string | null
+  /** Salida «Fallo»: paso al que saltar si este falla. */
+  onError?: string | null
+}
+
+export interface SwitchCase {
+  label?: string
+  conditions: WorkflowCondition[]
+  mode?: 'all' | 'any'
+  next?: string | null
 }
 
 export type Step = StepBase &
@@ -359,6 +368,7 @@ export type Step = StepBase &
         onTrue?: string | null
         onFalse?: string | null
       }
+    | { type: 'switch'; cases: SwitchCase[]; otherwise?: string | null }
     | { type: 'runWorkflow'; workflowId: string; input?: Record<string, unknown>; wait?: boolean }
     | {
         type: 'resource'

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useI18n } from 'vue-i18n'
 import JsonEditor from '@/app/shared/components/JsonEditor.vue'
 import KeyValueEditor from '@/app/shared/components/KeyValueEditor.vue'
 import CodeEditor from '@/app/shared/components/CodeEditor.vue'
-import type { Operator, Step, StepBody } from '@/infrastructure/api/types.ts'
+import ConditionList from './ConditionList.vue'
+import type { Step, StepBody } from '@/infrastructure/api/types.ts'
 
 const props = defineProps<{
   /** Ids de los demás pasos (para saltos). */
@@ -12,9 +12,10 @@ const props = defineProps<{
   /** Workflows del servicio (para ejecutar otro workflow). */
   workflows: { id: string; name: string }[]
   workflowId: string
+  /** Panel angosto (inspector del diagrama): un campo por fila. */
+  compact?: boolean
 }>()
 const step = defineModel<Step>({ required: true })
-const { t } = useI18n()
 
 const jumpItems = computed(() => [
   { title: 'Siguiente paso', value: null },
@@ -22,12 +23,16 @@ const jumpItems = computed(() => [
   ...props.stepIds.filter((id) => id && id !== step.value.id).map((id) => ({ title: `Ir a «${id}»`, value: id })),
 ])
 
+const errorItems = computed(() => [
+  { title: 'Fallar la ejecución', value: null },
+  { title: 'Terminar como completada (end)', value: 'end' },
+  ...props.stepIds.filter((id) => id && id !== step.value.id).map((id) => ({ title: `Ir a «${id}»`, value: id })),
+])
+
+const third = computed(() => (props.compact ? 12 : 4))
+const half = computed(() => (props.compact ? 12 : 6))
+
 const methods = ['POST', 'GET', 'PUT', 'PATCH', 'DELETE']
-const operators = computed(() =>
-  (
-    ['equals', 'notEquals', 'contains', 'notContains', 'exists', 'notExists', 'greaterThan', 'lessThan', 'regex'] as Operator[]
-  ).map((value) => ({ value, title: t(`operator.${value}`) })),
-)
 const otherWorkflows = computed(() =>
   props.workflows.filter((w) => w.id !== props.workflowId).map((w) => ({ title: w.name, value: w.id })),
 )
@@ -40,28 +45,6 @@ const resourceOps = [
   { value: 'delete', title: 'Eliminar' },
   { value: 'list', title: 'Listar' },
 ]
-
-const needsValue = (op: Operator) => op !== 'exists' && op !== 'notExists'
-
-function valueText(v: unknown): string {
-  if (v === undefined || v === null) return ''
-  return typeof v === 'string' ? v : JSON.stringify(v)
-}
-
-function parseValue(s: string): unknown {
-  const trimmed = s.trim()
-  if (trimmed === '') return ''
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return Number(trimmed)
-  if (trimmed === 'true' || trimmed === 'false') return trimmed === 'true'
-  if (/^[[{]/.test(trimmed)) {
-    try {
-      return JSON.parse(trimmed)
-    } catch {
-      /* texto */
-    }
-  }
-  return s
-}
 
 const num = (v: unknown) => {
   const n = Number(v)
@@ -95,6 +78,23 @@ const expectedText = computed({
   },
 })
 
+function setOnError(v: string | null) {
+  step.value.onError = v ?? undefined
+  if (v && step.value.type === 'http') step.value.continueOnError = false
+}
+
+function addCase() {
+  if (step.value.type !== 'switch') return
+  step.value.cases.push({ label: `Caso ${step.value.cases.length + 1}`, conditions: [{ path: '', operator: 'equals', value: '' }] })
+}
+
+function moveCase(i: number, d: -1 | 1) {
+  if (step.value.type !== 'switch') return
+  const list = step.value.cases
+  if (i + d < 0 || i + d >= list.length) return
+  ;[list[i], list[i + d]] = [list[i + d]!, list[i]!]
+}
+
 function ensureRetry() {
   if (http.value && !http.value.retry) http.value.retry = { maxAttempts: 0, backoffMs: 1000, multiplier: 2 }
   return http.value!.retry!
@@ -104,14 +104,24 @@ function ensureRetry() {
 <template>
   <div class="d-flex flex-column gap-4">
     <VRow dense>
-      <VCol cols="12" md="4"><FTextField v-model="step.id" label="Identificador" class="mono" hint="Resultados en steps.<id>" persistent-hint /></VCol>
-      <VCol cols="12" md="4"><FTextField v-model="step.name" label="Nombre (opcional)" /></VCol>
-      <VCol v-if="step.type !== 'condition' && step.type !== 'end' && step.type !== 'fail'" cols="12" md="4">
+      <VCol cols="12" :md="third"><FTextField v-model="step.id" label="Identificador" class="mono" hint="Resultados en steps.<id>" persistent-hint /></VCol>
+      <VCol cols="12" :md="third"><FTextField v-model="step.name" label="Nombre (opcional)" /></VCol>
+      <VCol v-if="!['condition', 'switch', 'end', 'fail'].includes(step.type)" cols="12" :md="third">
         <FSelect
           :model-value="step.next ?? null"
           :items="jumpItems"
           label="Después"
           @update:model-value="step.next = $event ?? undefined"
+        />
+      </VCol>
+      <VCol v-if="step.type !== 'end' && step.type !== 'fail'" cols="12" :md="third">
+        <FSelect
+          :model-value="step.onError ?? null"
+          :items="errorItems"
+          label="Si falla"
+          hint="Salida «Fallo»: el error queda en steps.<id>.error."
+          persistent-hint
+          @update:model-value="setOnError($event)"
         />
       </VCol>
     </VRow>
@@ -138,7 +148,7 @@ function ensureRetry() {
 
     <!-- HTTP -->
     <template v-else-if="step.type === 'http'">
-      <div class="d-flex gap-2">
+      <div class="d-flex gap-2" :class="{ 'flex-wrap': compact }">
         <FSelect v-model="step.method" :items="methods" label="Método" class="mono" style="max-width: 140px" />
         <FTextField
           v-model="step.url"
@@ -150,11 +160,11 @@ function ensureRetry() {
         />
       </div>
       <VRow>
-        <VCol cols="12" md="6">
+        <VCol cols="12" :md="half">
           <div class="f-field__label">Headers</div>
           <KeyValueEditor v-model="step.headers" key-placeholder="x-signature" value-placeholder="{{ vars.SECRET }}" add-label="Agregar header" />
         </VCol>
-        <VCol cols="12" md="6">
+        <VCol cols="12" :md="half">
           <div class="f-field__label">Query</div>
           <KeyValueEditor v-model="step.query" key-placeholder="event" value-placeholder="signed" add-label="Agregar parámetro" />
         </VCol>
@@ -206,7 +216,13 @@ function ensureRetry() {
           <FTextField :model-value="step.retry?.multiplier ?? 2" label="Multiplicador" type="number" step="0.5" min="1" @update:model-value="ensureRetry().multiplier = Number($event) || 1" />
         </VCol>
       </VRow>
-      <VSwitch v-model="step.continueOnError" label="Si falla tras los reintentos, continuar con el siguiente paso" color="primary" hide-details />
+      <VSwitch
+        v-if="!step.onError"
+        v-model="step.continueOnError"
+        label="Si falla tras los reintentos, continuar con el siguiente paso"
+        color="primary"
+        hide-details
+      />
     </template>
 
     <!-- Emitir evento -->
@@ -228,34 +244,14 @@ function ensureRetry() {
 
     <!-- Condición -->
     <template v-else-if="step.type === 'condition'">
-      <div class="d-flex flex-column gap-2">
-        <div v-for="(c, i) in step.conditions" :key="i" class="d-flex flex-wrap align-center gap-2">
-          <FTextField v-model="c.path" class="mono" placeholder="request.body.monto" hide-details style="min-width: 220px" />
-          <FSelect v-model="c.operator" :items="operators" hide-details style="max-width: 180px" />
-          <FTextField
-            v-if="needsValue(c.operator)"
-            :model-value="valueText(c.value)"
-            class="mono"
-            placeholder="valor"
-            hide-details
-            style="min-width: 140px"
-            @update:model-value="c.value = parseValue($event)"
-          />
-          <VBtn icon="mdi-delete-outline" variant="text" size="small" aria-label="Quitar" @click="step.type === 'condition' && step.conditions.splice(i, 1)" />
-        </div>
-        <div>
-          <VBtn variant="text" size="small" color="primary" prepend-icon="mdi-plus" @click="step.type === 'condition' && step.conditions.push({ path: '', operator: 'equals', value: '' })">
-            Agregar condición
-          </VBtn>
-        </div>
-        <div class="text-body-small text-medium-emphasis">
-          Rutas disponibles: <code class="inline">request.*</code>, <code class="inline">response.*</code>,
-          <code class="inline">input.*</code>, <code class="inline">vars.*</code>, <code class="inline">steps.&lt;id&gt;.*</code>,
-          <code class="inline">execution.status</code>.
-        </div>
+      <ConditionList v-model="step.conditions" />
+      <div class="text-body-small text-medium-emphasis">
+        Rutas disponibles: <code class="inline">request.*</code>, <code class="inline">response.*</code>,
+        <code class="inline">input.*</code>, <code class="inline">vars.*</code>, <code class="inline">steps.&lt;id&gt;.*</code>,
+        <code class="inline">execution.status</code>.
       </div>
       <VRow dense>
-        <VCol cols="12" md="4">
+        <VCol cols="12" :md="third">
           <FSelect
             :model-value="step.mode ?? 'all'"
             :items="[{ title: 'Todas se cumplen', value: 'all' }, { title: 'Al menos una', value: 'any' }]"
@@ -263,13 +259,52 @@ function ensureRetry() {
             @update:model-value="step.type === 'condition' && (step.mode = $event)"
           />
         </VCol>
-        <VCol cols="6" md="4">
+        <VCol :cols="compact ? 12 : 6" :md="third">
           <FSelect :model-value="step.onTrue ?? null" :items="jumpItems" label="Si se cumple" @update:model-value="step.type === 'condition' && (step.onTrue = $event ?? undefined)" />
         </VCol>
-        <VCol cols="6" md="4">
+        <VCol :cols="compact ? 12 : 6" :md="third">
           <FSelect :model-value="step.onFalse ?? null" :items="jumpItems" label="Si no se cumple" @update:model-value="step.type === 'condition' && (step.onFalse = $event ?? undefined)" />
         </VCol>
       </VRow>
+    </template>
+
+    <!-- Dividir según -->
+    <template v-else-if="step.type === 'switch'">
+      <div class="text-body-small text-medium-emphasis">
+        Los casos se evalúan en orden; gana el primero que se cumple. Cada caso es una salida en el diagrama.
+      </div>
+      <VCard v-for="(c, i) in step.cases" :key="i" variant="outlined" class="pa-3">
+        <div class="d-flex align-center gap-2 mb-2">
+          <FTextField v-model="c.label" :placeholder="`Caso ${i + 1}`" label="Nombre de la salida" hide-details class="flex-1-1" />
+          <VBtn icon="mdi-arrow-up" variant="text" size="small" title="Subir" :disabled="i === 0" @click="moveCase(i, -1)" />
+          <VBtn icon="mdi-delete-outline" variant="text" size="small" title="Quitar caso" @click="step.type === 'switch' && step.cases.splice(i, 1)" />
+        </div>
+        <ConditionList v-model="c.conditions" />
+        <VRow dense class="mt-1">
+          <VCol cols="12" :md="half">
+            <FSelect
+              :model-value="c.mode ?? 'all'"
+              :items="[{ title: 'Todas se cumplen', value: 'all' }, { title: 'Al menos una', value: 'any' }]"
+              label="Modo"
+              @update:model-value="c.mode = $event"
+            />
+          </VCol>
+          <VCol cols="12" :md="half">
+            <FSelect :model-value="c.next ?? null" :items="jumpItems" label="Ir a" @update:model-value="c.next = $event ?? undefined" />
+          </VCol>
+        </VRow>
+      </VCard>
+      <div class="d-flex flex-wrap align-end gap-3">
+        <VBtn variant="tonal" size="small" prepend-icon="mdi-plus" @click="addCase">Agregar caso</VBtn>
+        <VSpacer />
+        <FSelect
+          :model-value="step.otherwise ?? null"
+          :items="jumpItems"
+          label="Si ningún caso se cumple"
+          style="min-width: 220px"
+          @update:model-value="step.type === 'switch' && (step.otherwise = $event ?? undefined)"
+        />
+      </div>
     </template>
 
     <!-- Ejecutar otro workflow -->

@@ -609,6 +609,13 @@ pub fn validate_workflow(
             ));
         }
         check_jump(&mut issues, format!("{base}.next"), &step.next);
+        check_jump(&mut issues, format!("{base}.onError"), &step.on_error);
+        if step.on_error.is_some() && matches!(step.action, Action::Fail { .. } | Action::End) {
+            issues.push(Issue::new(
+                format!("{base}.onError"),
+                "este tipo de paso no tiene salida de error",
+            ));
+        }
 
         match &step.action {
             Action::Wait { duration_ms } => {
@@ -715,31 +722,23 @@ pub fn validate_workflow(
                 on_false,
                 ..
             } => {
-                if conditions.is_empty() {
-                    issues.push(Issue::new(
-                        format!("{base}.conditions"),
-                        "agrega al menos una condición",
-                    ));
-                }
-                for (j, c) in conditions.iter().enumerate() {
-                    if c.path.trim().is_empty() {
-                        issues.push(Issue::new(
-                            format!("{base}.conditions[{j}].path"),
-                            "indica el dato a evaluar (p. ej. request.body.monto)",
-                        ));
-                    }
-                    let rule = Rule {
-                        source: RuleSource::Variable,
-                        key: c.path.clone(),
-                        operator: c.operator,
-                        value: c.value.clone(),
-                    };
-                    let mut sub = Vec::new();
-                    validate_rule(&mut sub, &format!("{base}.conditions[{j}]"), &rule);
-                    issues.extend(sub.into_iter().filter(|x| !x.field.ends_with(".key")));
-                }
+                validate_conditions(&mut issues, &format!("{base}.conditions"), conditions);
                 check_jump(&mut issues, format!("{base}.onTrue"), on_true);
                 check_jump(&mut issues, format!("{base}.onFalse"), on_false);
+            }
+            Action::Switch { cases, otherwise } => {
+                if cases.is_empty() {
+                    issues.push(Issue::new(
+                        format!("{base}.cases"),
+                        "agrega al menos un caso",
+                    ));
+                }
+                for (j, c) in cases.iter().enumerate() {
+                    let cb = format!("{base}.cases[{j}]");
+                    validate_conditions(&mut issues, &format!("{cb}.conditions"), &c.conditions);
+                    check_jump(&mut issues, format!("{cb}.next"), &c.next);
+                }
+                check_jump(&mut issues, format!("{base}.otherwise"), otherwise);
             }
             Action::RunWorkflow { workflow_id, .. } => {
                 if workflow_id.trim().is_empty() {
@@ -774,6 +773,33 @@ pub fn validate_workflow(
         }
     }
     issues
+}
+
+fn validate_conditions(
+    issues: &mut Vec<Issue>,
+    base: &str,
+    conditions: &[crate::workflow::Condition],
+) {
+    if conditions.is_empty() {
+        issues.push(Issue::new(base, "agrega al menos una condición"));
+    }
+    for (j, c) in conditions.iter().enumerate() {
+        if c.path.trim().is_empty() {
+            issues.push(Issue::new(
+                format!("{base}[{j}].path"),
+                "indica el dato a evaluar (p. ej. request.body.monto)",
+            ));
+        }
+        let rule = Rule {
+            source: RuleSource::Variable,
+            key: c.path.clone(),
+            operator: c.operator,
+            value: c.value.clone(),
+        };
+        let mut sub = Vec::new();
+        validate_rule(&mut sub, &format!("{base}[{j}]"), &rule);
+        issues.extend(sub.into_iter().filter(|x| !x.field.ends_with(".key")));
+    }
 }
 
 #[cfg(test)]

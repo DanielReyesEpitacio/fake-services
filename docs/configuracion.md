@@ -261,6 +261,7 @@ Un workflow pertenece a un servicio y se guarda en `services/<servicio>/workflow
 | `emit` | `event`, `data` | Evento en la línea de tiempo y en los eventos en vivo. |
 | `setVariables` | `values` | Asigna `vars.*`. |
 | `condition` | `conditions[]` (`path`, `operator`, `value`), `mode`, `onTrue`, `onFalse` | Salta según el resultado. |
+| `switch` | `cases[]` (`label`, `conditions[]`, `mode`, `next`), `otherwise` | «Dividir según»: gana el primer caso que se cumple; si ninguno, `otherwise`. Deja `steps.<id>.case` y `steps.<id>.label`. |
 | `runWorkflow` | `workflowId`, `input`, `wait` | Inicia otro workflow del servicio (máx. 5 niveles). |
 | `resource` | `collection`, `operation`, `recordId`, `data`, `failIfMissing` | Lee o modifica un recurso persistente (mismas operaciones que en los escenarios). El resultado queda en `steps.<id>.resource` (o `resources`) y `steps.<id>.found`. |
 | `fail` | `message` | Termina la ejecución como fallida. |
@@ -268,6 +269,11 @@ Un workflow pertenece a un servicio y se guarda en `services/<servicio>/workflow
 
 Cualquier paso acepta `next` para saltar a otro paso (`end` termina). Los bucles están permitidos
 y se cortan con `maxSteps`.
+
+Todo paso salvo `fail` y `end` acepta `onError`: si el paso falla (HTTP agotó reintentos, recurso
+inexistente con `failIfMissing`, workflow hijo fallido, plantilla inválida...), la ejecución no
+falla y sigue en ese paso. El mensaje queda en `steps.<id>.error`. En el diagrama es la salida
+«Fallo».
 
 El campo opcional `layout` (`{ "<id de paso>": { "x": 0, "y": 120 } }`) guarda las posiciones del
 editor visual; no afecta la ejecución.

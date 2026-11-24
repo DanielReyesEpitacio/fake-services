@@ -106,6 +106,10 @@ pub struct Step {
     /// Paso al que saltar al terminar (`end` termina). Por defecto, el siguiente.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next: Option<String>,
+    /// Paso al que saltar si este paso falla (salida «Fallo» del diagrama). Sin él,
+    /// un fallo termina la ejecución. El error queda en `steps.<id>.error`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub on_error: Option<String>,
     #[serde(flatten)]
     pub action: Action,
 }
@@ -145,6 +149,14 @@ pub enum Action {
         /// Destino si no se cumple (`next` por defecto).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         on_false: Option<String>,
+    },
+    /// Dividir según varios casos: gana el primero que se cumple.
+    #[serde(rename_all = "camelCase")]
+    Switch {
+        cases: Vec<SwitchCase>,
+        /// Destino si ningún caso se cumple (`next` por defecto).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        otherwise: Option<String>,
     },
     /// Ejecutar otro workflow del mismo servicio.
     #[serde(rename_all = "camelCase")]
@@ -188,6 +200,7 @@ impl Action {
             Action::Emit { .. } => "emit",
             Action::SetVariables { .. } => "setVariables",
             Action::Condition { .. } => "condition",
+            Action::Switch { .. } => "switch",
             Action::RunWorkflow { .. } => "runWorkflow",
             Action::Resource { .. } => "resource",
             Action::Fail { .. } => "fail",
@@ -305,6 +318,21 @@ pub struct Condition {
     pub operator: Operator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<Value>,
+}
+
+/// Caso de un paso `switch`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SwitchCase {
+    /// Nombre visible de la salida (p. ej. «Aprobado»).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub label: String,
+    pub conditions: Vec<Condition>,
+    #[serde(default, skip_serializing_if = "RuleMode::is_all")]
+    pub mode: RuleMode,
+    /// Destino si el caso se cumple (`next` por defecto).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
 }
 
 /// Cuándo inicia un escenario su workflow.

@@ -555,13 +555,20 @@ impl WorkflowEngine {
                     result,
                 )
                 .await;
+                let mut jump = None;
                 if !ok {
                     let msg = format!("el workflow hijo {child_id} no se completó");
-                    self.finish(&mut rec, ExecutionStatus::Failed, Some(msg))
+                    let pc = rec.pc as usize;
+                    let Some(target) = error_exit(&def, pc) else {
+                        self.finish(&mut rec, ExecutionStatus::Failed, Some(msg))
+                            .await;
+                        return;
+                    };
+                    self.take_error_exit(&mut rec, &def, pc, &msg, &target)
                         .await;
-                    return;
+                    jump = Some(target);
                 }
-                if !self.advance(&mut rec, &def, None).await {
+                if !self.advance(&mut rec, &def, jump).await {
                     return;
                 }
                 continue;
@@ -621,6 +628,14 @@ impl WorkflowEngine {
                     return;
                 }
                 Outcome::Fail(msg) => {
+                    if let Some(target) = error_exit(&def, pc) {
+                        self.take_error_exit(&mut rec, &def, pc, &msg, &target)
+                            .await;
+                        if !self.advance(&mut rec, &def, Some(target)).await {
+                            return;
+                        }
+                        continue;
+                    }
                     rec.steps_executed += 1;
                     self.finish(&mut rec, ExecutionStatus::Failed, Some(msg))
                         .await;
@@ -655,6 +670,36 @@ impl WorkflowEngine {
                 false
             }
         }
+    }
+
+    /// Registra el error de un paso que continúa por su salida «Fallo».
+    async fn take_error_exit(
+        &self,
+        rec: &mut ExecutionRecord,
+        def: &Workflow,
+        pc: usize,
+        msg: &str,
+        target: &str,
+    ) {
+        let sid = def.steps[pc].id.clone();
+        if !rec.context["steps"][&sid].is_object() {
+            rec.context["steps"][&sid] = json!({});
+        }
+        rec.context["steps"][&sid]["status"] = json!("failed");
+        rec.context["steps"][&sid]["error"] = json!(msg);
+        let dest = if target == fakes_domain::workflow::JUMP_END {
+            "terminar".to_string()
+        } else {
+            format!("«{target}»")
+        };
+        self.timeline(
+            rec,
+            "error_handled",
+            Some(&sid),
+            &format!("Falló; se sigue por la salida de error → {dest}"),
+            json!({"error": msg, "target": target}),
+        )
+        .await;
     }
 
     async fn on_cancelled(&self, rec: &mut ExecutionRecord) {
@@ -793,24 +838,7 @@ impl WorkflowEngine {
                 on_true,
                 on_false,
             } => {
-                let mut ctx = rec.context.clone();
-                ctx["execution"]["status"] = json!(rec.status.as_str());
-                let mut details = Vec::new();
-                for c in conditions {
-                    let actual = lookup_path(&ctx, &c.path).cloned();
-                    let ok = eval_operator(c.operator, actual.as_ref(), c.value.as_ref(), None);
-                    details.push(json!({
-                        "path": c.path, "operator": c.operator, "expected": c.value,
-                        "actual": actual, "result": ok,
-                    }));
-                }
-                let results = details
-                    .iter()
-                    .map(|d| d["result"].as_bool().unwrap_or(false));
-                let passed = match mode {
-                    RuleMode::All => results.clone().all(|b| b),
-                    RuleMode::Any => results.clone().any(|b| b),
-                };
+                let (passed, details) = eval_conditions(rec, conditions, *mode);
                 let target = if passed {
                     on_true.clone()
                 } else {
@@ -827,6 +855,48 @@ impl WorkflowEngine {
                         target.clone().unwrap_or_else(|| "siguiente paso".into())
                     ),
                     json!({"result": passed, "conditions": details}),
+                )
+                .await;
+                Outcome::Next(Some(target.unwrap_or_else(|| "next".into())))
+            }
+
+            Action::Switch { cases, otherwise } => {
+                let mut evaluated = Vec::new();
+                let mut matched = None;
+                for (i, c) in cases.iter().enumerate() {
+                    let (passed, details) = eval_conditions(rec, &c.conditions, c.mode);
+                    evaluated.push(json!({"case": i, "label": c.label, "result": passed, "conditions": details}));
+                    if passed {
+                        matched = Some(i);
+                        break;
+                    }
+                }
+                let (label, target) = match matched {
+                    Some(i) => {
+                        let c = &cases[i];
+                        let label = if c.label.is_empty() {
+                            format!("caso {}", i + 1)
+                        } else {
+                            c.label.clone()
+                        };
+                        (label, c.next.clone())
+                    }
+                    None => ("ningún caso".to_string(), otherwise.clone()),
+                };
+                rec.context["steps"][&sid] = json!({
+                    "status": "completed",
+                    "case": matched,
+                    "label": label,
+                });
+                self.timeline(
+                    rec,
+                    "condition_evaluated",
+                    Some(&sid),
+                    &format!(
+                        "Se cumplió {label} → {}",
+                        target.clone().unwrap_or_else(|| "siguiente paso".into())
+                    ),
+                    json!({"case": matched, "cases": evaluated}),
                 )
                 .await;
                 Outcome::Next(Some(target.unwrap_or_else(|| "next".into())))
@@ -1170,6 +1240,40 @@ fn resource_verb(op: fakes_domain::ResourceOp) -> &'static str {
         D::Delete => "Borrado",
         D::List => "Listado",
     }
+}
+
+/// Destino de la salida «Fallo» del paso, si la tiene.
+fn error_exit(def: &Workflow, pc: usize) -> Option<String> {
+    def.steps
+        .get(pc)
+        .filter(|s| !matches!(s.action, Action::Fail { .. } | Action::End))
+        .and_then(|s| s.on_error.clone())
+}
+
+/// Evalúa condiciones sobre el contexto de la ejecución.
+fn eval_conditions(
+    rec: &ExecutionRecord,
+    conditions: &[fakes_domain::Condition],
+    mode: RuleMode,
+) -> (bool, Vec<Value>) {
+    let mut ctx = rec.context.clone();
+    ctx["execution"]["status"] = json!(rec.status.as_str());
+    let mut details = Vec::new();
+    let mut results = Vec::new();
+    for c in conditions {
+        let actual = lookup_path(&ctx, &c.path).cloned();
+        let ok = eval_operator(c.operator, actual.as_ref(), c.value.as_ref(), None);
+        results.push(ok);
+        details.push(json!({
+            "path": c.path, "operator": c.operator, "expected": c.value,
+            "actual": actual, "result": ok,
+        }));
+    }
+    let passed = match mode {
+        RuleMode::All => results.iter().all(|b| *b),
+        RuleMode::Any => results.iter().any(|b| *b),
+    };
+    (passed, details)
 }
 
 fn trigger_label(t: TriggerKind) -> &'static str {

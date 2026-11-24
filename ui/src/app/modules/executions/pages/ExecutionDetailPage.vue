@@ -63,6 +63,7 @@ const kindLook: Record<string, { color?: string; icon: string }> = {
   child_started: { icon: 'mdi-sitemap-outline' },
   step_completed: { color: 'success', icon: 'mdi-check' },
   step_failed: { color: 'error', icon: 'mdi-alert' },
+  error_handled: { color: 'warning', icon: 'mdi-call-missed' },
   completed: { color: 'success', icon: 'mdi-flag-checkered' },
   failed: { color: 'error', icon: 'mdi-alert-circle' },
   cancelled: { icon: 'mdi-close-circle' },

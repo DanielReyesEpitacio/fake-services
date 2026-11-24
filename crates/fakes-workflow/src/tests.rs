@@ -563,3 +563,64 @@ async fn start_errors() {
         Err(EngineError::Disabled(_))
     ));
 }
+
+#[tokio::test]
+async fn switch_cases_and_error_exits() {
+    let (base, recv) = receiver().await;
+    recv.flaky_failures.store(100, Ordering::SeqCst);
+    let store = Store::in_memory().await.unwrap();
+    let (engine, _) = engine_with(
+        store.clone(),
+        catalog(vec![
+            json!({"id": "dividir", "name": "Dividir", "steps": [
+                {"id": "segun", "type": "switch", "cases": [
+                    {"label": "Alto", "conditions": [{"path": "input.monto", "operator": "greaterThan", "value": 1000}], "next": "alto"},
+                    {"label": "Medio", "conditions": [{"path": "input.monto", "operator": "greaterThan", "value": 100}], "next": "medio"}
+                 ], "otherwise": "bajo"},
+                {"id": "alto", "type": "setVariables", "values": {"rama": "alto"}, "next": "end"},
+                {"id": "medio", "type": "setVariables", "values": {"rama": "medio"}, "next": "end"},
+                {"id": "bajo", "type": "setVariables", "values": {"rama": "bajo"}}]}),
+            json!({"id": "rescate", "name": "Rescate", "steps": [
+                {"id": "hook", "type": "http", "method": "POST", "url": format!("{base}/flaky"), "onError": "fallback"},
+                {"id": "ok", "type": "setVariables", "values": {"rama": "ok"}, "next": "end"},
+                {"id": "fallback", "type": "setVariables", "values": {"rama": "fallback", "error": "{{ steps.hook.error }}"}}]}),
+            json!({"id": "recurso", "name": "Recurso", "steps": [
+                {"id": "leer", "type": "resource", "collection": "docs", "operation": "get", "recordId": "x",
+                 "failIfMissing": true, "onError": "end"},
+                {"id": "nunca", "type": "fail", "message": "no debió llegar"}]}),
+        ]),
+    )
+    .await;
+
+    for (monto, rama) in [(5000, "alto"), (500, "medio"), (5, "bajo")] {
+        let e = engine
+            .start(start_req(
+                "dividir",
+                json!({}),
+                BTreeMap::from([("monto".to_string(), json!(monto))]),
+            ))
+            .await
+            .unwrap();
+        let e = wait_finished(&store, &e.id).await;
+        assert_eq!(e.status, ExecutionStatus::Completed);
+        assert_eq!(e.context["vars"]["rama"], rama, "monto {monto}");
+    }
+
+    let e = engine
+        .start(start_req("rescate", json!({}), BTreeMap::new()))
+        .await
+        .unwrap();
+    let e = wait_finished(&store, &e.id).await;
+    assert_eq!(e.status, ExecutionStatus::Completed, "{:?}", e.error);
+    assert_eq!(e.context["vars"]["rama"], "fallback");
+    assert!(e.context["vars"]["error"].as_str().unwrap().contains("500"));
+    assert_eq!(e.context["steps"]["hook"]["status"], "failed");
+
+    let e = engine
+        .start(start_req("recurso", json!({}), BTreeMap::new()))
+        .await
+        .unwrap();
+    let e = wait_finished(&store, &e.id).await;
+    assert_eq!(e.status, ExecutionStatus::Completed, "{:?}", e.error);
+    assert_eq!(e.context["steps"]["leer"]["found"], false);
+}

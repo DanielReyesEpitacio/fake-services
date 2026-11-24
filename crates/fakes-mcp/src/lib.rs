@@ -31,7 +31,7 @@ endpoints, escenarios y workflows (o importar_openapi / importar_coleccion_postm
 Las respuestas admiten plantillas MiniJinja: {{ request.params.id }}, {{ request.body.campo }}, {{ request.query.x }}, \
 {{ request.headers['x-h'] }}, {{ vars.NOMBRE }}, {{ uuid() }}, {{ now() }}, {{ fake('rfc') }}. Un texto JSON que es \
 solo '{{ expr }}' conserva su tipo. Los escenarios se evalúan en orden (gana el primero cuyas reglas se cumplen); \
-uno sin reglas es la respuesta por defecto. Para webhooks asíncronos usa workflows (pasos wait, http, condition, \
+uno sin reglas es la respuesta por defecto. Para webhooks asíncronos usa workflows (pasos wait, http, condition, switch, \
 setVariables, emit, runWorkflow, resource, fail, end) vinculados desde scenario.workflows. Usa obtener_esquema \
 para ver el JSON Schema completo de service, endpoint, workflow o bundle. Para actualizar se usa JSON Merge Patch \
 en el campo `changes`.";

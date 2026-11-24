@@ -9,8 +9,10 @@ import EmptyState from '@/app/shared/components/EmptyState.vue'
 import IssuesList from '@/app/shared/components/IssuesList.vue'
 import JsonEditor from '@/app/shared/components/JsonEditor.vue'
 import StepEditor from '../components/StepEditor.vue'
-import WorkflowDiagram from '../components/WorkflowDiagram.vue'
-import ExecutionStatusChip from '@/app/modules/executions/components/ExecutionStatusChip.vue'
+import WorkflowDiagram, { type Trace } from '../components/WorkflowDiagram.vue'
+import WorkflowSettings from '../components/WorkflowSettings.vue'
+import { newStep, stepIcons, stepSummary, stepTypes, uniqueStepId } from '../steps.ts'
+import { appendStep, removeStep as removeGraphStep, renameRefs } from '../graph.ts'
 import type { ExecutionSummary, Issue, Step, StepType, Workflow, WorkflowUsage } from '@/infrastructure/api/types.ts'
 
 const props = defineProps<{ sid: string; wid: string }>()
@@ -27,9 +29,11 @@ const issues = ref<Issue[]>([])
 const notFound = ref(false)
 const saving = ref(false)
 const openPanels = ref<number[]>([])
-const view = ref<'list' | 'diagram'>(localStorage.getItem('fakes.workflowView') === 'diagram' ? 'diagram' : 'list')
+const view = ref<'list' | 'diagram'>(localStorage.getItem('fakes.workflowView') === 'list' ? 'list' : 'diagram')
 watch(view, (v) => localStorage.setItem('fakes.workflowView', v))
-const selectedStep = ref<number | null>(null)
+/** Paso seleccionado en el diagrama, o el disparador. */
+const selectedStep = ref<number | 'trigger' | null>(null)
+const selectedIndex = computed(() => (typeof selectedStep.value === 'number' && wf.value?.steps[selectedStep.value] ? selectedStep.value : null))
 
 const invalidJson = reactive(new Set<symbol>())
 provide('invalidJson', invalidJson)
@@ -82,6 +86,7 @@ async function loadExecutions() {
 
 const stop = onExecution((e) => {
   if (e.serviceId === props.sid && e.workflowId === props.wid) loadExecutions()
+  if (e.id === traceId.value) loadTrace()
 })
 onBeforeUnmount(stop)
 
@@ -104,60 +109,11 @@ onBeforeRouteLeave(async () => {
 
 // -- pasos ------------------------------------------------------------------
 
-const stepTypes: StepType[] = ['wait', 'http', 'condition', 'setVariables', 'resource', 'emit', 'runWorkflow', 'fail', 'end']
-const stepIcons: Record<StepType, string> = {
-  wait: 'mdi-timer-sand',
-  http: 'mdi-send',
-  emit: 'mdi-broadcast',
-  setVariables: 'mdi-variable',
-  condition: 'mdi-call-split',
-  runWorkflow: 'mdi-sitemap-outline',
-  resource: 'mdi-database-outline',
-  fail: 'mdi-alert-octagon-outline',
-  end: 'mdi-flag-checkered',
-}
-
-function uniqueStepId(base: string): string {
-  const ids = new Set(stepIds.value)
-  if (!ids.has(base)) return base
-  let n = 2
-  while (ids.has(`${base}-${n}`)) n++
-  return `${base}-${n}`
-}
-
-function newStep(type: StepType): Step {
-  const id = uniqueStepId(
-    { wait: 'espera', http: 'webhook', emit: 'evento', setVariables: 'variables', condition: 'condicion', runWorkflow: 'subflujo', resource: 'recurso', fail: 'error', end: 'fin' }[type],
-  )
-  switch (type) {
-    case 'wait':
-      return { id, name: '', type, durationMs: 5000 }
-    case 'http':
-      return {
-        id, name: '', type, method: 'POST', url: '{{ request.body.callback_url }}',
-        headers: {}, query: {}, body: { type: 'json', content: { status: 'ok' } },
-        timeoutMs: 10000, retry: { maxAttempts: 3, backoffMs: 1000, multiplier: 2 }, continueOnError: false,
-      }
-    case 'emit':
-      return { id, name: '', type, event: 'evento' }
-    case 'setVariables':
-      return { id, name: '', type, values: { valor: 1 } }
-    case 'condition':
-      return { id, name: '', type, conditions: [{ path: 'vars.valor', operator: 'equals', value: 1 }], mode: 'all' }
-    case 'runWorkflow':
-      return { id, name: '', type, workflowId: '', wait: false }
-    case 'resource':
-      return { id, name: '', type, collection: 'items', operation: 'update', recordId: '{{ response.body.id }}', data: { status: 'done' } }
-    case 'fail':
-      return { id, name: '', type, message: 'Error simulado' }
-    default:
-      return { id, name: '', type: 'end' }
-  }
-}
+const stepIdsSet = () => wf.value?.steps.map((s) => s.id) ?? []
 
 function addStep(type: StepType) {
   if (!wf.value) return
-  wf.value.steps.push(newStep(type))
+  wf.value.steps.push(newStep(type, stepIdsSet()))
   openPanels.value = [...openPanels.value, wf.value.steps.length - 1]
   selectedStep.value = wf.value.steps.length - 1
 }
@@ -165,8 +121,16 @@ function addStep(type: StepType) {
 function changeType(i: number, type: StepType) {
   if (!wf.value) return
   const old = wf.value.steps[i]
-  const fresh = newStep(type)
-  wf.value.steps[i] = { ...fresh, id: old.id, name: old.name, next: old.next } as Step
+  const fresh = newStep(type, stepIdsSet())
+  const keepNext = !['condition', 'switch', 'end', 'fail'].includes(type)
+  const keepError = type !== 'end' && type !== 'fail'
+  wf.value.steps[i] = {
+    ...fresh,
+    id: old.id,
+    name: old.name,
+    ...(keepNext && old.next ? { next: old.next } : {}),
+    ...(keepError && old.onError ? { onError: old.onError } : {}),
+  } as Step
 }
 
 function move(i: number, d: -1 | 1) {
@@ -178,7 +142,7 @@ function move(i: number, d: -1 | 1) {
 function duplicate(i: number) {
   if (!wf.value) return
   const copy: Step = JSON.parse(JSON.stringify(wf.value.steps[i]))
-  copy.id = uniqueStepId(copy.id)
+  copy.id = uniqueStepId(copy.id, stepIdsSet())
   wf.value.steps.splice(i + 1, 0, copy)
 }
 
@@ -187,28 +151,46 @@ function removeStep(i: number) {
   selectedStep.value = null
 }
 
-function stepSummary(s: Step): string {
-  switch (s.type) {
-    case 'wait':
-      return s.durationMs >= 1000 ? `${s.durationMs / 1000} s` : `${s.durationMs} ms`
-    case 'http':
-      return `${s.method} ${s.url}`
-    case 'emit':
-      return s.event
-    case 'setVariables':
-      return Object.keys(s.values ?? {}).join(', ')
-    case 'condition':
-      return `${s.conditions.length} condición(es) → ${s.onTrue ?? 'siguiente'} / ${s.onFalse ?? 'siguiente'}`
-    case 'runWorkflow':
-      return `${s.workflowId || '—'}${s.wait ? ' (espera)' : ''}`
-    case 'resource':
-      return `${s.operation} ${s.collection}${s.recordId ? ` / ${s.recordId}` : ''}`
-    case 'fail':
-      return s.message
-    default:
-      return ''
-  }
+// En el diagrama, duplicar y eliminar conservan las conexiones de los demás pasos.
+function duplicateInDiagram(i: number) {
+  const w = wf.value
+  if (!w) return
+  const copy: Step = JSON.parse(JSON.stringify(w.steps[i]))
+  copy.id = uniqueStepId(copy.id, stepIdsSet())
+  const pos = w.layout?.[w.steps[i]!.id]
+  appendStep(w.steps, copy)
+  if (pos) (w.layout ??= {})[copy.id] = { x: pos.x + 40, y: pos.y + 60 }
+  selectedStep.value = w.steps.length - 1
 }
+
+function removeInDiagram(i: number) {
+  const w = wf.value
+  if (!w) return
+  const id = w.steps[i]?.id
+  selectedStep.value = null
+  removeGraphStep(w.steps, i)
+  if (id && w.layout) delete w.layout[id]
+}
+
+// Renombrar un paso actualiza los saltos que apuntan a él y su posición.
+watch(
+  () => wf.value?.steps.map((s) => s.id) ?? [],
+  (now, before) => {
+    const w = wf.value
+    if (!w || now.length !== before.length) return
+    now.forEach((id, i) => {
+      const old = before[i]
+      if (!old || old === id || !id) return
+      const others = now.filter((_, j) => j !== i)
+      if (others.includes(id) || others.includes(old)) return
+      renameRefs(w.steps, old, id)
+      if (w.layout?.[old]) {
+        w.layout[id] = w.layout[old]
+        delete w.layout[old]
+      }
+    })
+  },
+)
 
 const stepIssues = (i: number) => issues.value.filter((x) => x.field.startsWith(`steps[${i}]`))
 const errorSteps = computed(() => {
@@ -220,14 +202,56 @@ const errorSteps = computed(() => {
   return set
 })
 
-// -- programación -----------------------------------------------------------
+// -- recorrido de una ejecución ----------------------------------------------
 
-const scheduled = computed({
-  get: () => !!wf.value?.schedule,
-  set: (v) => {
-    if (wf.value) wf.value.schedule = v ? { everyMs: 60000 } : null
-  },
-})
+const traceId = ref<string | null>(null)
+const trace = ref<Trace | null>(null)
+
+async function loadTrace() {
+  const id = traceId.value
+  if (!id) {
+    trace.value = null
+    return
+  }
+  try {
+    const d = await api.execution(id)
+    if (traceId.value !== id) return
+    const visits: Trace['visits'] = {}
+    const edges = new Set<string>()
+    let prev: string | null = null
+    let first: string | null = null
+    for (const e of d.timeline) {
+      const sid = e.stepId
+      if (!sid) continue
+      if (sid !== prev) {
+        if (prev) edges.add(`${prev}>${sid}`)
+        else first = sid
+        visits[sid] ??= { count: 0, status: 'ok' }
+        visits[sid].count++
+        prev = sid
+      }
+      if (e.kind === 'step_failed') visits[sid]!.status = 'error'
+      if (e.kind === 'error_handled') visits[sid]!.status = 'handled'
+    }
+    if (first) edges.add(`__inicio>${first}`)
+    const ex = d.execution
+    if (!['completed', 'failed', 'cancelled'].includes(ex.status) && ex.currentStep && visits[ex.currentStep]) {
+      visits[ex.currentStep].status = 'running'
+    }
+    trace.value = { visits, edges, first }
+  } catch (e) {
+    toastError(e)
+    traceId.value = null
+  }
+}
+watch(traceId, loadTrace)
+
+const traceItems = computed(() =>
+  executions.value.map((e) => ({
+    value: e.id,
+    title: `${t(`executionStatus.${e.status}`)} · ${formatTime(e.createdMs)}`,
+  })),
+)
 
 // -- guardar / ejecutar -----------------------------------------------------
 
@@ -302,7 +326,10 @@ async function run() {
     const e = await api.runWorkflow(props.sid, props.wid, runInput.value ?? {}, runContext.value)
     runDialog.value = false
     toast('Ejecución iniciada')
-    router.push(`/ejecuciones/${e.id}`)
+    if (view.value === 'diagram') {
+      traceId.value = e.id
+      loadExecutions()
+    } else router.push(`/ejecuciones/${e.id}`)
   } catch (e) {
     toastError(e)
   }
@@ -346,61 +373,100 @@ function onKey(e: KeyboardEvent) {
 
       <IssuesList :issues="issues.filter((i) => !i.field.startsWith('steps['))" />
 
-      <VRow>
-        <VCol cols="12" lg="8">
-          <div class="d-flex align-center gap-3 mb-3">
-            <div class="text-title-medium font-weight-bold">Pasos</div>
-            <span class="text-body-small text-medium-emphasis">Se ejecutan en orden salvo que un paso indique un salto.</span>
-            <VSpacer />
-            <VBtn v-if="view === 'diagram'" size="small" variant="text" prepend-icon="mdi-auto-fix" @click="diagram?.arrange()">Ordenar</VBtn>
-            <VBtnToggle v-model="view" mandatory color="primary" divided>
-              <VBtn value="list" size="small" prepend-icon="mdi-format-list-bulleted">Lista</VBtn>
-              <VBtn value="diagram" size="small" prepend-icon="mdi-graph-outline">Diagrama</VBtn>
-            </VBtnToggle>
-          </div>
+      <div class="d-flex flex-wrap align-center gap-3 mb-3">
+        <div class="text-title-medium font-weight-bold">Flujo</div>
+        <span v-if="view === 'list'" class="text-body-small text-medium-emphasis">Se ejecutan en orden salvo que un paso indique un salto.</span>
+        <VSpacer />
+        <template v-if="view === 'diagram'">
+          <FSelect
+            v-model="traceId"
+            :items="traceItems"
+            clearable
+            hide-details
+            placeholder="Ver recorrido de una ejecución"
+            no-data-text="Aún no se ha ejecutado"
+            prepend-inner-icon="mdi-map-marker-path"
+            style="min-width: 280px; max-width: 320px"
+          />
+          <VBtn size="small" variant="text" prepend-icon="mdi-auto-fix" @click="diagram?.arrange()">Ordenar</VBtn>
+        </template>
+        <VBtnToggle v-model="view" mandatory color="primary" divided>
+          <VBtn value="diagram" size="small" prepend-icon="mdi-graph-outline">Diagrama</VBtn>
+          <VBtn value="list" size="small" prepend-icon="mdi-format-list-bulleted">Lista</VBtn>
+        </VBtnToggle>
+      </div>
 
-          <template v-if="view === 'diagram'">
-            <WorkflowDiagram
-              ref="diagram"
-              v-model="wf"
-              v-model:selected="selectedStep"
-              :icons="stepIcons"
-              :summary="stepSummary"
-              :errors="errorSteps"
-              class="mb-4"
-            />
-            <VCard v-if="selectedStep !== null && wf.steps[selectedStep]" class="mb-4">
-              <VCardItem>
-                <template #prepend><VIcon :icon="stepIcons[wf.steps[selectedStep]!.type]" color="primary" /></template>
-                <VCardTitle>{{ wf.steps[selectedStep]!.name || wf.steps[selectedStep]!.id }}</VCardTitle>
-                <VCardSubtitle>Paso {{ selectedStep + 1 }} · {{ t(`stepType.${wf.steps[selectedStep]!.type}`) }}</VCardSubtitle>
-                <template #append>
-                  <VMenu>
-                    <template #activator="{ props: menu }">
-                      <VBtn v-bind="menu" icon="mdi-swap-horizontal" variant="text" size="small" title="Cambiar tipo" />
-                    </template>
-                    <VList density="compact">
-                      <VListItem v-for="st in stepTypes" :key="st" :prepend-icon="stepIcons[st]" :title="t(`stepType.${st}`)" @click="changeType(selectedStep, st)" />
-                    </VList>
-                  </VMenu>
-                  <VBtn icon="mdi-content-duplicate" variant="text" size="small" title="Duplicar" @click="duplicate(selectedStep)" />
-                  <VBtn icon="mdi-delete-outline" variant="text" size="small" title="Eliminar" @click="removeStep(selectedStep)" />
-                  <VBtn icon="mdi-close" variant="text" size="small" title="Cerrar" @click="selectedStep = null" />
-                </template>
-              </VCardItem>
-              <VCardText>
-                <IssuesList :issues="stepIssues(selectedStep)" />
-                <StepEditor v-model="wf.steps[selectedStep]" :step-ids="stepIds" :workflows="siblings" :workflow-id="wf.id" />
-              </VCardText>
-            </VCard>
-            <div v-else-if="wf.steps.length" class="text-body-small text-medium-emphasis mb-4">
-              Haz clic en un paso para editarlo.
+      <!-- Diagrama: lienzo + inspector -->
+      <div v-if="view === 'diagram'" class="studio mb-4">
+        <WorkflowDiagram
+          ref="diagram"
+          v-model="wf"
+          v-model:selected="selectedStep"
+          :errors="errorSteps"
+          :used-by="usedBy.length"
+          :trace="trace"
+          class="studio__canvas"
+        />
+        <aside class="studio__inspector">
+          <VCard v-if="selectedIndex !== null" class="studio__panel">
+            <VCardItem>
+              <template #prepend><VIcon :icon="stepIcons[wf.steps[selectedIndex]!.type]" color="primary" /></template>
+              <VCardTitle>{{ wf.steps[selectedIndex]!.name || wf.steps[selectedIndex]!.id }}</VCardTitle>
+              <VCardSubtitle>{{ t(`stepType.${wf.steps[selectedIndex]!.type}`) }}</VCardSubtitle>
+              <template #append>
+                <VMenu>
+                  <template #activator="{ props: menu }">
+                    <VBtn v-bind="menu" icon="mdi-swap-horizontal" variant="text" size="small" title="Cambiar tipo" />
+                  </template>
+                  <VList density="compact">
+                    <VListItem v-for="st in stepTypes" :key="st" :prepend-icon="stepIcons[st]" :title="t(`stepType.${st}`)" @click="changeType(selectedIndex, st)" />
+                  </VList>
+                </VMenu>
+                <VBtn icon="mdi-content-duplicate" variant="text" size="small" title="Duplicar" @click="duplicateInDiagram(selectedIndex)" />
+                <VBtn icon="mdi-delete-outline" variant="text" size="small" title="Eliminar (Supr)" @click="removeInDiagram(selectedIndex)" />
+                <VBtn icon="mdi-close" variant="text" size="small" title="Cerrar" @click="selectedStep = null" />
+              </template>
+            </VCardItem>
+            <VCardText>
+              <IssuesList :issues="stepIssues(selectedIndex)" />
+              <div v-if="trace?.visits[wf.steps[selectedIndex]!.id]" class="text-body-small mb-3">
+                <VIcon icon="mdi-map-marker-path" size="small" class="me-1" />
+                En la ejecución seleccionada se ejecutó {{ trace.visits[wf.steps[selectedIndex]!.id]!.count }} vez/veces.
+                <RouterLink :to="`/ejecuciones/${traceId}`">Ver detalle</RouterLink>
+              </div>
+              <StepEditor v-model="wf.steps[selectedIndex]" :step-ids="stepIds" :workflows="siblings" :workflow-id="wf.id" compact />
+            </VCardText>
+          </VCard>
+          <template v-else>
+            <div class="d-flex align-center gap-2 mb-3 px-1">
+              <VIcon icon="mdi-lightning-bolt" color="primary" />
+              <span class="text-title-medium font-weight-bold">Disparador y ajustes</span>
             </div>
+            <div class="text-body-small text-medium-emphasis mb-3 px-1">
+              Selecciona un paso para editarlo. Une la salida de un paso con otro para decidir a dónde sigue; suelta una salida en
+              un espacio vacío para crear el siguiente paso.
+            </div>
+            <WorkflowSettings
+              v-model="wf"
+              :sid="sid"
+              :wid="wid"
+              :used-by="usedBy"
+              :executions="executions"
+              :trace-id="traceId"
+              can-trace
+              @trace="traceId = $event"
+              @remove="remove"
+            />
           </template>
+        </aside>
+      </div>
 
-          <EmptyState v-if="view === 'list' && !wf.steps.length" icon="mdi-format-list-numbered" title="Sin pasos" text="Agrega el primer paso del workflow." />
+      <!-- Lista -->
+      <VRow v-else>
+        <VCol cols="12" lg="8">
+          <EmptyState v-if="!wf.steps.length" icon="mdi-format-list-numbered" title="Sin pasos" text="Agrega el primer paso del workflow." />
 
-          <VExpansionPanels v-if="view === 'list'" v-model="openPanels" multiple class="mb-4">
+          <VExpansionPanels v-model="openPanels" multiple class="mb-4">
             <VExpansionPanel v-for="(s, i) in wf.steps" :key="i" :value="i">
               <VExpansionPanelTitle>
                 <div class="d-flex align-center gap-3 w-100 me-2 min-w-0">
@@ -451,71 +517,8 @@ function onKey(e: KeyboardEvent) {
           </VMenu>
         </VCol>
 
-        <VCol cols="12" lg="4" class="d-flex flex-column gap-4">
-          <VCard title="General">
-            <VCardText class="d-flex flex-column gap-3">
-              <FTextField v-model="wf.name" label="Nombre" />
-              <FTextarea v-model="wf.description" label="Descripción" rows="2" />
-              <FTextField :model-value="wf.id" label="Identificador" class="mono" disabled />
-              <VSwitch v-model="wf.enabled" label="Habilitado" color="primary" hide-details />
-              <FTextField v-model.number="wf.maxSteps" label="Pasos máximos por ejecución" type="number" min="1" hint="Evita bucles infinitos." persistent-hint />
-            </VCardText>
-          </VCard>
-
-          <VCard title="Ejecución periódica">
-            <VCardText class="d-flex flex-column gap-3">
-              <VSwitch v-model="scheduled" label="Ejecutar cada cierto tiempo" color="primary" hide-details />
-              <FTextField
-                v-if="wf.schedule"
-                v-model.number="wf.schedule.everyMs"
-                label="Intervalo (ms)"
-                type="number"
-                min="1000"
-                hint="Solo mientras el servicio está iniciado."
-                persistent-hint
-              />
-            </VCardText>
-          </VCard>
-
-          <VCard title="Variables iniciales">
-            <VCardText>
-              <JsonEditor v-model="wf.variables" empty-as="object" hint="Disponibles como vars.* (se combinan con las del servicio)." />
-            </VCardText>
-          </VCard>
-
-          <VCard title="Lo inician">
-            <VCardText>
-              <div v-if="!usedBy.length" class="text-body-small text-medium-emphasis">
-                Ningún escenario lo inicia todavía. Vincúlalo desde un endpoint, en la sección «Workflows» de un escenario.
-              </div>
-              <VList v-else density="compact">
-                <VListItem
-                  v-for="u in usedBy"
-                  :key="`${u.endpointId}/${u.scenarioId}`"
-                  :to="`/servicios/${sid}/endpoints/${u.endpointId}`"
-                  prepend-icon="mdi-routes"
-                  :title="u.endpointId"
-                  :subtitle="`Escenario: ${u.scenarioId}`"
-                />
-              </VList>
-            </VCardText>
-          </VCard>
-
-          <VCard title="Ejecuciones recientes">
-            <template #append><VBtn variant="text" size="small" :to="`/ejecuciones?workflow=${wid}&servicio=${sid}`">Ver todas</VBtn></template>
-            <VList v-if="executions.length" density="compact">
-              <VListItem v-for="e in executions" :key="e.id" :to="`/ejecuciones/${e.id}`">
-                <template #prepend><ExecutionStatusChip :status="e.status" class="me-3" /></template>
-                <VListItemTitle class="text-body-small">{{ t(`trigger.${e.trigger}`) }}</VListItemTitle>
-                <template #append><span class="text-body-small text-medium-emphasis">{{ formatTime(e.createdMs) }}</span></template>
-              </VListItem>
-            </VList>
-            <VCardText v-else class="text-body-small text-medium-emphasis">Aún no se ha ejecutado.</VCardText>
-          </VCard>
-
-          <div>
-            <VBtn color="error" variant="tonal" prepend-icon="mdi-delete-outline" @click="remove">Eliminar workflow</VBtn>
-          </div>
+        <VCol cols="12" lg="4">
+          <WorkflowSettings v-model="wf" :sid="sid" :wid="wid" :used-by="usedBy" :executions="executions" @remove="remove" />
         </VCol>
       </VRow>
 
@@ -546,5 +549,32 @@ function onKey(e: KeyboardEvent) {
   position: sticky;
   top: calc(var(--v-layout-top, 0px) + 8px);
   z-index: 5;
+}
+.studio {
+  display: flex;
+  gap: 16px;
+  height: calc(100vh - var(--v-layout-top, 0px) - 210px);
+  min-height: 600px;
+}
+.studio__canvas {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.studio__inspector {
+  flex: 0 0 440px;
+  overflow: auto;
+  padding-right: 2px;
+}
+@media (max-width: 1100px) {
+  .studio {
+    flex-direction: column;
+    height: auto;
+  }
+  .studio__canvas {
+    height: 620px;
+  }
+  .studio__inspector {
+    flex-basis: auto;
+  }
 }
 </style>

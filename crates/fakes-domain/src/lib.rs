@@ -15,7 +15,7 @@ pub use model::*;
 pub use path::{PathTemplate, Segment, normalize_prefix};
 pub use validate::Issue;
 pub use workflow::{
-    Action, Condition, HttpAction, StartWhen, Step, StepBody, Workflow, WorkflowLink,
+    Action, Condition, HttpAction, StartWhen, Step, StepBody, SwitchCase, Workflow, WorkflowLink,
 };
 
 /// Convierte un texto en un identificador válido: `"AWS S3"` → `"aws-s3"`.
