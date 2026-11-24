@@ -14,8 +14,9 @@ Está pensado **para agentes de IA primero**: todo lo que se puede hacer desde l
 puede hacer desde la API de administración (y, en la fase 3, desde un servidor MCP), sin
 escribir código.
 
-- Un solo ejecutable con servidor HTTP, motor de simulación, administración e interfaz web.
-- Funciona sin Internet y sin Docker, en Windows 10/11 y Linux.
+- Un solo ejecutable con servidor HTTP, motor de simulación, administración e interfaz web
+  (se usa desde el navegador).
+- Funciona sin Internet, sin Docker y sin dependencias, en Windows 10/11 y Linux.
 - La configuración son archivos JSON que puedes versionar en Git y compartir entre sistemas.
 
 ## Estado
@@ -24,44 +25,75 @@ escribir código.
 |---|---|---|
 | 1 | Espacios de trabajo, servicios, servidor central, endpoints, matching, respuestas dinámicas, historial, interfaz | ✅ Implementada |
 | 2 | Motor de workflows: esperas, condiciones, webhooks con URLs dinámicas, reintentos, ejecuciones durables con línea de tiempo | ✅ Implementada |
-| 3 | Servidor MCP, importación OpenAPI/Postman, exportación | Pendiente (la API REST ya existe) |
+| 3 | Importar y exportar servicios, espacios y workflows (JSON) | ✅ Implementada |
+| 3 | Servidor MCP, importación de OpenAPI y Postman | Pendiente (la API REST ya existe) |
 | 4 | Editor visual de workflows, plantillas de proveedores, recursos persistentes | Pendiente |
 
 ## Instalar
 
-Un solo comando compila e instala (requiere Rust, Node.js 20+ y pnpm):
+Fake Services es **un solo programa** (`fakes`) con el servidor, el motor y la interfaz web.
+No necesita Docker, Node, bases de datos ni conexión a Internet. Al ejecutarlo se abre la
+interfaz en tu navegador.
 
-| Sistema | Todo (CLI + app de escritorio) | Solo el CLI `fakes` |
+### Desde un paquete (sin compilar)
+
+Descarga el paquete de tu sistema desde *Releases*:
+
+| Sistema | Paquete | Instalar |
 |---|---|---|
-| Linux | `./scripts/install.sh` | `./scripts/install.sh --solo-cli` |
-| Windows (PowerShell) | `.\scripts\install.ps1` | `.\scripts\install.ps1 -SoloCli` |
+| Ubuntu, Debian y derivadas | `fake-services_<versión>_amd64.deb` | `sudo apt install ./fake-services_*.deb` |
+| Fedora, RHEL y derivadas | `fake-services-<versión>.x86_64.rpm` | `sudo dnf install ./fake-services-*.rpm` |
+| Cualquier Linux (sin sudo) | `fake-services-<versión>-linux-x86_64.tar.gz` | descomprime y ejecuta `./instalar.sh` |
+| Windows 10/11 | `fake-services-<versión>-windows-x86_64.zip` | descomprime y haz doble clic en `instalar.cmd` |
 
-- En Linux, si faltan WebKitGTK o libsoup, el script muestra el comando para instalarlas
-  (apt, dnf o pacman) y pregunta antes de usar `sudo`. Usa `-y` para no preguntar.
-- La app de escritorio se instala como paquete DEB/RPM o, en otras distribuciones, como
-  AppImage en tu carpeta personal con acceso en el menú de aplicaciones. En Windows se usa su
-  instalador NSIS, solo para tu usuario.
-- Para desinstalar: `./scripts/install.sh --desinstalar` o `.\scripts\install.ps1 -Desinstalar`.
-- Para solo compilar (sin instalar): `./scripts/build.sh` o `.\scripts\build.ps1`. Los
-  instaladores quedan en `target/release/bundle/`.
+Después abre **Fake Services** desde el menú de aplicaciones (o ejecuta `fakes`).
 
-## Inicio rápido
+### Desde el código
 
-### Con el CLI (sin interfaz de escritorio)
+Requiere Rust, Node.js 20+ y pnpm:
 
 ```bash
-cargo build --release -p fakes-cli
-./target/release/fakes serve
+./scripts/install.sh          # Linux: compila e instala en ~/.local (sin sudo)
+./scripts/build.sh --paquetes # genera .deb, .rpm y .tar.gz en dist/
 ```
 
-```
-  Fake Services 0.1.0
-  Simulaciones:   http://127.0.0.1:4000
-    ● Ejemplo              http://127.0.0.1:4000/ejemplo
-  Administración: http://127.0.0.1:4010
+```powershell
+.\scripts\install.ps1         # Windows: compila e instala para tu usuario
+.\scripts\build.ps1 -Paquete  # genera el .zip en dist\
 ```
 
-Abre `http://127.0.0.1:4010` para usar la interfaz web y prueba el servicio de ejemplo:
+**Actualizar es usar el mismo instalador.** `instalar.sh` / `instalar.cmd` detecta la versión
+instalada y la reemplaza:
+
+- Si Fake Services está corriendo, lo detiene de forma ordenada, instala y lo vuelve a iniciar en
+  segundo plano.
+- Limpia restos de instalaciones anteriores (app de escritorio, rutas viejas) y actualiza el
+  inicio automático.
+- Si encuentra además un paquete del sistema (`.deb`/`.rpm`), ofrece quitarlo para que quede una
+  sola instalación.
+- Tus espacios de trabajo, historial y ejecuciones se conservan; la base de datos se migra sola.
+
+Con los paquetes `.deb`/`.rpm`, `apt install`/`dnf install` de la versión nueva también actualiza.
+
+Para desinstalar: `./instalar.sh --desinstalar` o `instalar.ps1 -Desinstalar`.
+
+## Uso
+
+```bash
+fakes              # inicia y abre la interfaz; si ya está corriendo, solo la abre
+fakes serve --sin-navegador   # para servidores o terminales sin escritorio
+fakes detener      # detiene la instancia en ejecución (también la de segundo plano)
+fakes token        # token de la API para agentes y scripts
+```
+
+- Interfaz: `http://127.0.0.1:4010` · Simulaciones: `http://127.0.0.1:4000/<servicio>`
+- En **Ajustes → Iniciar con el sistema**, Fake Services arranca en segundo plano al iniciar
+  sesión.
+- En **Importar y exportar** guardas tus servicios (con endpoints, escenarios y workflows) en un
+  archivo JSON y los cargas en otra instalación. También desde la API: `GET /api/v1/export` y
+  `POST /api/v1/import`.
+
+Prueba el servicio de ejemplo:
 
 ```bash
 curl http://127.0.0.1:4000/ejemplo/usuarios/42
@@ -78,21 +110,6 @@ curl -i -X POST http://127.0.0.1:4000/ejemplo/documentos/contrato-1/firmar \
 ```
 
 El header `x-fakes-executions` trae el id de la ejecución; síguela en *Ejecuciones*.
-
-### Aplicación de escritorio
-
-La app de escritorio (Tauri) incluye el mismo núcleo, una ventana nativa, icono en la bandeja e
-inicio automático con el sistema. Para compilarla en Linux necesitas las dependencias de WebKitGTK:
-
-```bash
-sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
-  librsvg2-dev libayatana-appindicator3-dev build-essential
-cargo install tauri-cli --version '^2'
-cd ui && pnpm install && pnpm build && cd ..
-cd apps/desktop && cargo tauri build
-```
-
-Esto genera instaladores NSIS/MSI (Windows) y AppImage/DEB/RPM (Linux).
 
 ## Conceptos
 
@@ -141,7 +158,7 @@ Si un texto es solo `{{ expresión }}` se conserva el tipo (número, lista, obje
 
 ```bash
 cargo test                 # pruebas del núcleo
-cargo run -p fakes-cli     # núcleo + API en :4010
+cargo run -p fakes-cli -- serve --sin-navegador   # núcleo + API en :4010
 cd ui && pnpm dev          # interfaz con recarga en caliente en :5173 (proxy a :4010)
 ```
 

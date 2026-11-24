@@ -3,16 +3,15 @@
   Compila Fake Services en Windows 10/11.
 
 .DESCRIPTION
-  .\scripts\build.ps1             CLI + instaladores de escritorio (NSIS .exe y MSI)
-  .\scripts\build.ps1 -SoloCli    solo el binario fakes.exe
+  .\scripts\build.ps1            binario target\release\fakes.exe (con la interfaz web incluida)
+  .\scripts\build.ps1 -Paquete   además genera dist\fake-services-<versión>-windows-x86_64.zip
 
-  Requisitos: Rust (rustup, toolchain MSVC), Visual Studio Build Tools con
-  "Desarrollo para el escritorio con C++", Node.js 20+ y pnpm.
-  WebView2 ya viene incluido en Windows 10/11.
+  Requisitos: Rust (rustup, toolchain MSVC con "Desarrollo para el escritorio con C++"),
+  Node.js 20+ y pnpm. El resultado no necesita nada de eso.
 #>
 [CmdletBinding()]
 param(
-  [switch]$SoloCli
+  [switch]$Paquete
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,7 +20,6 @@ Set-Location $Root
 
 function Paso($t)  { Write-Host ""; Write-Host "▸ $t" -ForegroundColor White }
 function Ok($t)    { Write-Host "  ✓ $t" -ForegroundColor Green }
-function Aviso($t) { Write-Host "  ! $t" -ForegroundColor Yellow }
 function Falla($t) { Write-Host "  ✗ $t" -ForegroundColor Red; exit 1 }
 
 function Ejecutar([string]$Exe, [string[]]$Arguments) {
@@ -29,65 +27,64 @@ function Ejecutar([string]$Exe, [string[]]$Arguments) {
   if ($LASTEXITCODE -ne 0) { Falla "Falló: $Exe $($Arguments -join ' ')" }
 }
 
-# ---------------------------------------------------------------------------
 Paso 'Revisando herramientas'
-
 if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) {
   Falla 'No se encontró Rust. Instálalo desde https://rustup.rs (toolchain MSVC) y vuelve a ejecutar.'
 }
 Ok "Rust $((rustc --version).Split(' ')[1])"
-
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   Falla 'No se encontró Node.js (20 o superior). Instálalo desde https://nodejs.org.'
 }
 Ok "Node $(node --version)"
-
-$Pnpm = $null
-if (Get-Command pnpm -ErrorAction SilentlyContinue) { $Pnpm = @('pnpm') }
-elseif (Get-Command corepack -ErrorAction SilentlyContinue) { $Pnpm = @('corepack', 'pnpm') }
+$PnpmCmd = $null
+if (Get-Command pnpm -ErrorAction SilentlyContinue) { $PnpmCmd = @('pnpm') }
+elseif (Get-Command corepack -ErrorAction SilentlyContinue) { $PnpmCmd = @('corepack', 'pnpm') }
 else { Falla 'No se encontró pnpm. Instálalo con: npm install -g pnpm' }
 
 function Pnpm([string[]]$Arguments) {
-  if ($Pnpm.Count -eq 2) { Ejecutar $Pnpm[0] (@($Pnpm[1]) + $Arguments) } else { Ejecutar $Pnpm[0] $Arguments }
+  if ($PnpmCmd.Count -eq 2) { Ejecutar $PnpmCmd[0] (@($PnpmCmd[1]) + $Arguments) } else { Ejecutar $PnpmCmd[0] $Arguments }
 }
 
-if (-not $SoloCli) {
-  $tauri = $null
-  try { $tauri = & cargo tauri --version 2>$null } catch { $tauri = $null }
-  if (-not $tauri -or $LASTEXITCODE -ne 0) {
-    Aviso 'Falta tauri-cli (se instala una sola vez, tarda unos minutos)'
-    Ejecutar cargo @('install', 'tauri-cli', '--version', '^2', '--locked')
-    $tauri = & cargo tauri --version
-  }
-  Ok $tauri
-}
-
-# ---------------------------------------------------------------------------
-Paso 'Compilando la interfaz'
+Paso 'Compilando la interfaz web'
 Push-Location ui
-try {
-  Pnpm @('install', '--frozen-lockfile')
-  Pnpm @('build')
-} finally { Pop-Location }
+try { Pnpm @('install', '--frozen-lockfile'); Pnpm @('build') } finally { Pop-Location }
 Ok 'Interfaz lista en ui\dist'
 
-Paso 'Compilando el CLI (fakes.exe)'
+Paso 'Compilando fakes.exe'
 Ejecutar cargo @('build', '--release', '-p', 'fakes-cli')
 Ok 'Binario: target\release\fakes.exe'
 
-if (-not $SoloCli) {
-  Paso 'Generando instaladores de escritorio'
-  Push-Location apps\desktop
-  try { Ejecutar cargo @('tauri', 'build') } finally { Pop-Location }
+if ($Paquete) {
+  Paso 'Generando el .zip'
+  $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+  $version = ($meta.packages | Where-Object { $_.name -eq 'fakes-cli' }).version
+  $name = "fake-services-$version-windows-x86_64"
+  $tmp = Join-Path ([IO.Path]::GetTempPath()) $name
+  if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+  New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+  Copy-Item target\release\fakes.exe $tmp
+  Copy-Item scripts\install.ps1 (Join-Path $tmp 'instalar.ps1')
+  Copy-Item packaging\windows\instalar.cmd $tmp
+  @"
+Fake Services $version
+Servicios falsos. Integraciones reales.
+
+Instalar:          doble clic en instalar.cmd
+                   (o: powershell -ExecutionPolicy Bypass -File instalar.ps1)
+Usar sin instalar: doble clic en fakes.exe
+Desinstalar:       powershell -ExecutionPolicy Bypass -File instalar.ps1 -Desinstalar
+
+Al ejecutar Fake Services se abre la interfaz en tu navegador (http://127.0.0.1:4010).
+Las simulaciones responden en http://127.0.0.1:4000.
+"@ | Set-Content -Encoding UTF8 (Join-Path $tmp 'LEEME.txt')
+  New-Item -ItemType Directory -Force -Path dist | Out-Null
+  $zip = Join-Path $Root "dist\$name.zip"
+  if (Test-Path $zip) { Remove-Item -Force $zip }
+  Compress-Archive -Path $tmp -DestinationPath $zip
+  Remove-Item -Recurse -Force $tmp
+  Ok $zip
 }
 
-# ---------------------------------------------------------------------------
 Paso 'Listo'
-Write-Host "  CLI:        $Root\target\release\fakes.exe"
-if (-not $SoloCli) {
-  Get-ChildItem -ErrorAction SilentlyContinue `
-    "$Root\target\release\bundle\nsis\*.exe", "$Root\target\release\bundle\msi\*.msi" |
-    ForEach-Object { Write-Host "  Instalador: $($_.FullName)" }
-}
-Write-Host ''
-Write-Host '  Para instalar: .\scripts\install.ps1'
+Write-Host '  Ejecuta:  .\target\release\fakes.exe'
+Write-Host '  Instala:  .\scripts\install.ps1'

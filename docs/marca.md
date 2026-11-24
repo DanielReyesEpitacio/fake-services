@@ -12,8 +12,8 @@ Unas llaves `{ }` (las de las plantillas y la configuración) enmarcan unas gafa
 bigote: una API que se hace pasar por otra. Las pupilas en verde lima indican que el servicio
 está en ejecución.
 
-Archivos: `assets/brand/logo.svg`, `assets/brand/logo-512.png` e iconos de la app en
-`apps/desktop/icons/`.
+Archivos: `assets/brand/logo.svg`, PNG de 128, 256 y 512 px y `logo.ico` (icono del ejecutable
+de Windows) en `assets/brand/`.
 
 ## Colores
 

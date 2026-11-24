@@ -428,3 +428,38 @@ export interface ExecutionDetail {
   execution: ExecutionRecord
   timeline: TimelineEntry[]
 }
+
+// -- importar / exportar -----------------------------------------------------
+
+export interface Bundle {
+  format: 'fake-services'
+  formatVersion: number
+  exportedAt?: string
+  appVersion?: string
+  workspace?: Workspace | null
+  services: Service[]
+  files?: Record<string, string>
+}
+
+export type OnConflict = 'rename' | 'replace' | 'skip'
+export type ImportMode = 'merge' | 'newWorkspace'
+
+export interface ImportReport {
+  dryRun: boolean
+  workspaceId: string
+  created: string[]
+  replaced: string[]
+  skipped: string[]
+  renamed: { from: string; to: string }[]
+  files: number
+  endpoints: number
+  workflows: number
+  warnings: string[]
+}
+
+export interface AutostartStatus {
+  supported: boolean
+  enabled: boolean
+  method: string
+  command: string | null
+}

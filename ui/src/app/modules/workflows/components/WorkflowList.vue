@@ -54,6 +54,41 @@ async function create() {
   }
 }
 
+const importInput = ref<HTMLInputElement>()
+
+async function importWorkflow(ev: Event) {
+  const f = (ev.target as HTMLInputElement).files?.[0]
+  ;(ev.target as HTMLInputElement).value = ''
+  if (!f) return
+  let wf: Record<string, unknown>
+  try {
+    wf = JSON.parse(await f.text())
+  } catch {
+    toast('El archivo no es JSON válido.', 'error')
+    return
+  }
+  if (!Array.isArray(wf?.steps) || typeof wf?.name !== 'string') {
+    toast('El archivo no parece un workflow (faltan name o steps).', 'error')
+    return
+  }
+  try {
+    let v
+    try {
+      v = await api.createWorkflow(props.sid, wf as never)
+    } catch (e) {
+      // Si el id ya existe, se importa como copia.
+      if (!(e instanceof ApiError && e.status === 409)) throw e
+      v = await api.createWorkflow(props.sid, { ...wf, id: '', name: `${wf.name} (importado)` } as never)
+    }
+    toast(`Workflow «${v.workflow.name}» importado`)
+    router.push(`/servicios/${props.sid}/workflows/${v.workflow.id}`)
+  } catch (e) {
+    if (e instanceof ApiError && e.issues.length) {
+      toast(`No se pudo importar: ${e.issues.map((i) => `${i.field}: ${i.message}`).join('; ')}`, 'error')
+    } else toastError(e)
+  }
+}
+
 async function run(w: WorkflowSummary) {
   try {
     const e = await api.runWorkflow(props.sid, w.id, {})
@@ -69,6 +104,8 @@ async function run(w: WorkflowSummary) {
     <VCardItem>
       <VCardSubtitle>Secuencias asíncronas: esperas, webhooks, condiciones y reintentos.</VCardSubtitle>
       <template #append>
+        <input ref="importInput" type="file" accept=".json,application/json" hidden @change="importWorkflow" />
+        <VBtn variant="text" size="small" prepend-icon="mdi-upload" class="me-1" @click="importInput?.click()">Importar</VBtn>
         <VBtn color="primary" size="small" prepend-icon="mdi-plus" @click="(showNew = true), (draft = { name: '', template: 'webhook' })">
           Nuevo workflow
         </VBtn>

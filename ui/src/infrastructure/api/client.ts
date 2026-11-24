@@ -22,6 +22,11 @@ import type {
   WorkflowView,
   ExecutionSummary,
   ExecutionDetail,
+  Bundle,
+  ImportMode,
+  ImportReport,
+  OnConflict,
+  AutostartStatus,
 } from './types.ts'
 
 const BASE = '/api/v1'
@@ -70,6 +75,39 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 const enc = encodeURIComponent
+
+/** Descarga un archivo de la API (con el token) y lo guarda en el equipo. */
+async function download(path: string): Promise<string> {
+  const headers: Record<string, string> = {}
+  const t = token()
+  if (t) headers.Authorization = `Bearer ${t}`
+  const resp = await fetch(BASE + path, { headers })
+  if (!resp.ok) {
+    const data = await resp.json().catch(() => null)
+    throw new ApiError(resp.status, data?.error ?? 'error', data?.message ?? `Error HTTP ${resp.status}`, data?.issues ?? [])
+  }
+  const cd = resp.headers.get('content-disposition') ?? ''
+  const filename = /filename="([^"]+)"/.exec(cd)?.[1] ?? 'fake-services.json'
+  saveBlob(await resp.blob(), filename)
+  return filename
+}
+
+/** Guarda un blob como archivo descargado. */
+export function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
+/** Guarda un valor como archivo JSON. */
+export function saveJson(value: unknown, filename: string) {
+  saveBlob(new Blob([JSON.stringify(value, null, 2) + '\n'], { type: 'application/json' }), filename)
+}
 
 export const api = {
   status: () => request<AppStatus>('GET', '/status'),
@@ -139,6 +177,26 @@ export const api = {
   execution: (id: string) => request<ExecutionDetail>('GET', `/executions/${enc(id)}`),
   cancelExecution: (id: string) => request<ExecutionSummary>('POST', `/executions/${enc(id)}/cancel`),
   clearExecutions: () => request<{ deleted: number }>('DELETE', '/executions'),
+
+  // Importar / exportar
+  exportBundle: (opts: { services?: string[]; workspace?: boolean; files?: boolean }) => {
+    const q = new URLSearchParams()
+    if (opts.services?.length) q.set('services', opts.services.join(','))
+    if (opts.workspace) q.set('workspace', 'true')
+    if (opts.files) q.set('files', 'true')
+    return download(`/export?${q.toString()}`)
+  },
+  importBundle: (req: {
+    bundle: Bundle
+    mode?: ImportMode
+    onConflict?: OnConflict
+    workspaceName?: string
+    dryRun?: boolean
+  }) => request<ImportReport>('POST', '/import', req),
+
+  // Sistema
+  autostart: () => request<AutostartStatus>('GET', '/system/autostart'),
+  setAutostart: (enabled: boolean) => request<AutostartStatus>('PUT', '/system/autostart', { enabled }),
 
   // Historial
   requests: (filter: {

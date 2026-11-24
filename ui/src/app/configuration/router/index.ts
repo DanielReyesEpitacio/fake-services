@@ -44,6 +44,11 @@ const router = createRouter({
       props: true,
     },
     {
+      path: '/importar-exportar',
+      name: RouteNames.transfer,
+      component: () => import('@/app/modules/transfer/pages/ImportExportPage.vue'),
+    },
+    {
       path: '/historial',
       name: RouteNames.history,
       component: () => import('@/app/modules/history/pages/HistoryPage.vue'),

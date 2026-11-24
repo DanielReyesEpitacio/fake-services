@@ -73,6 +73,14 @@ pub fn router() -> Router<AppState> {
         .route("/reload", post(reload))
         .route("/events", get(events))
         .route("/schemas/{name}", get(schema))
+        .route("/system/autostart", get(get_autostart).put(set_autostart))
+        .route("/system/shutdown", post(request_shutdown))
+        // Importar / exportar
+        .route("/export", get(export_bundle))
+        .route(
+            "/import",
+            post(import_bundle).layer(axum::extract::DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
         // Espacios de trabajo
         .route("/workspaces", get(list_workspaces).post(create_workspace))
         .route("/workspaces/register", post(register_workspace))
@@ -180,9 +188,10 @@ async fn schema(Path(name): Path<String>) -> Result<Json<Value>, ApiError> {
         "service" => schemars::schema_for!(Service),
         "endpoint" => schemars::schema_for!(Endpoint),
         "workflow" => schemars::schema_for!(fakes_domain::Workflow),
+        "bundle" => schemars::schema_for!(fakes_app::Bundle),
         _ => {
             return Err(ApiError(AppError::NotFound(format!(
-                "esquema '{name}' desconocido; opciones: workspace, service, endpoint, workflow"
+                "esquema '{name}' desconocido; opciones: workspace, service, endpoint, workflow, bundle"
             ))));
         }
     };
@@ -561,4 +570,124 @@ async fn cancel_execution(
 async fn clear_executions(State(app): State<AppState>) -> ApiResult<Value> {
     let deleted = app.clear_executions().await?;
     Ok(Json(json!({ "deleted": deleted })))
+}
+
+// -- sistema ----------------------------------------------------------------
+
+async fn get_autostart() -> ApiResult<fakes_app::AutostartStatus> {
+    Ok(Json(fakes_app::system::autostart_status()?))
+}
+
+#[derive(Deserialize)]
+struct AutostartBody {
+    enabled: bool,
+}
+
+async fn set_autostart(
+    payload: Result<Json<Value>, JsonRejection>,
+) -> ApiResult<fakes_app::AutostartStatus> {
+    let b: AutostartBody = body(payload)?;
+    Ok(Json(fakes_app::system::set_autostart(b.enabled)?))
+}
+
+// -- importar / exportar ------------------------------------------------------
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ExportQuery {
+    /// Ids separados por comas; vacío = todos.
+    #[serde(default)]
+    services: Option<String>,
+    #[serde(default)]
+    workspace: bool,
+    #[serde(default)]
+    files: bool,
+}
+
+async fn export_bundle(
+    State(app): State<AppState>,
+    Query(q): Query<ExportQuery>,
+) -> Result<Response, ApiError> {
+    let opts = fakes_app::ExportOptions {
+        services: q
+            .services
+            .as_deref()
+            .unwrap_or("")
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect(),
+        include_workspace: q.workspace,
+        include_files: q.files,
+    };
+    let bundle = app.export_bundle(&opts).await?;
+    let ws = app.status().await?.workspace_id;
+    let scope = match opts.services.as_slice() {
+        [one] => one.clone(),
+        _ => ws,
+    };
+    let filename = format!("fake-services-{scope}-{}.json", chrono_like_date());
+    let mut body = serde_json::to_vec_pretty(&bundle).unwrap_or_default();
+    body.push(b'\n');
+    Ok((
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/json".to_string(),
+            ),
+            (
+                axum::http::header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{filename}\""),
+            ),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+fn chrono_like_date() -> String {
+    // AAAA-MM-DD sin dependencias extra.
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let days = secs.div_euclid(86_400);
+    let (y, m, d) = civil_from_days(days);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Algoritmo de Howard Hinnant: días desde 1970-01-01 → fecha civil.
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+async fn import_bundle(
+    State(app): State<AppState>,
+    payload: Result<Json<Value>, JsonRejection>,
+) -> ApiResult<fakes_app::ImportReport> {
+    let req: fakes_app::ImportRequest = body(payload)?;
+    Ok(Json(app.import_bundle(req).await?))
+}
+
+/// Detiene Fake Services de forma ordenada (lo usan `fakes detener` y los instaladores).
+async fn request_shutdown(State(app): State<AppState>) -> (StatusCode, Json<Value>) {
+    let app = app.clone();
+    tokio::spawn(async move {
+        // Deja salir la respuesta antes de cerrar.
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        app.request_shutdown();
+    });
+    (
+        StatusCode::ACCEPTED,
+        Json(json!({ "message": "Fake Services se está deteniendo" })),
+    )
 }

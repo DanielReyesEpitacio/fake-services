@@ -5,7 +5,7 @@ import { refresh, store, toast, toastError } from '@/app/shared/state/live.ts'
 import IssuesList from '@/app/shared/components/IssuesList.vue'
 import KeyValueEditor from '@/app/shared/components/KeyValueEditor.vue'
 import PageHeader from '@/app/shared/components/PageHeader.vue'
-import type { Issue, Workspace } from '@/infrastructure/api/types.ts'
+import type { AutostartStatus, Issue, Workspace } from '@/infrastructure/api/types.ts'
 
 const ws = ref<Workspace | null>(null)
 const original = ref('')
@@ -17,6 +17,22 @@ const hostItems = [
   { title: '127.0.0.1 (solo este equipo)', value: '127.0.0.1' },
   { title: '0.0.0.0 (toda la red)', value: '0.0.0.0' },
 ]
+
+const autostart = ref<AutostartStatus | null>(null)
+const autostartBusy = ref(false)
+api.autostart().then((a) => (autostart.value = a)).catch(() => {})
+
+async function toggleAutostart(enabled: boolean | null) {
+  autostartBusy.value = true
+  try {
+    autostart.value = await api.setAutostart(!!enabled)
+    toast(enabled ? 'Fake Services iniciará con el sistema' : 'Inicio automático desactivado')
+  } catch (e) {
+    toastError(e)
+  } finally {
+    autostartBusy.value = false
+  }
+}
 
 async function load() {
   try {
@@ -81,6 +97,23 @@ const maxBodyMb = computed({
     <PageHeader title="Ajustes" :subtitle="`Configuración del espacio de trabajo activo (${store.status?.workspaceName ?? ''}).`" />
 
     <div v-if="ws" class="d-flex flex-column gap-4">
+      <VCard title="Iniciar con el sistema" subtitle="Fake Services arranca en segundo plano al iniciar sesión; abre la interfaz con «fakes» o desde el menú.">
+        <VCardText>
+          <VSwitch
+            :model-value="autostart?.enabled ?? false"
+            :disabled="!autostart?.supported"
+            :loading="autostartBusy"
+            label="Iniciar Fake Services al iniciar sesión"
+            color="primary"
+            hide-details
+            @update:model-value="toggleAutostart"
+          />
+          <div v-if="autostart" class="text-body-small text-medium-emphasis mt-2">
+            {{ autostart.method }}<template v-if="autostart.command"><br /><code class="inline">{{ autostart.command }}</code></template>
+          </div>
+        </VCardText>
+      </VCard>
+
       <VCard title="Espacio de trabajo">
         <VCardText class="d-flex flex-column gap-3">
           <VRow dense>

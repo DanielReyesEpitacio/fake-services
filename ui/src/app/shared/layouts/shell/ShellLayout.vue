@@ -19,6 +19,7 @@ const nav = [
   { to: '/ejecuciones', title: 'nav.executions', icon: 'mdi-sitemap-outline' },
   { to: '/historial', title: 'nav.history', icon: 'mdi-history' },
   { to: '/espacios', title: 'nav.workspaces', icon: 'mdi-folder-outline' },
+  { to: '/importar-exportar', title: 'nav.transfer', icon: 'mdi-swap-vertical' },
   { to: '/ajustes', title: 'nav.settings', icon: 'mdi-cog-outline' },
   { to: '/apariencia', title: 'nav.appearance', icon: 'mdi-palette' },
 ]

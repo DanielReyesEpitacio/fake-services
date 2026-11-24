@@ -7,10 +7,12 @@
 //! Cada modificación: valida → guarda en disco (fuente de verdad) →
 //! recompila la configuración → la publica en el servidor de simulación.
 
+pub mod bundle;
 mod error;
 mod history;
 mod merge;
 mod seed;
+pub mod system;
 pub mod views;
 mod workflows;
 
@@ -31,7 +33,9 @@ use serde::Serialize;
 use serde_json::Value;
 use tokio::sync::{Mutex, broadcast};
 
+pub use bundle::{Bundle, ExportOptions, ImportReport, ImportRequest};
 pub use error::{AppError, AppResult, ErrorBody};
+pub use system::AutostartStatus;
 pub use views::*;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -101,6 +105,7 @@ pub struct FakesApp {
     inner: Mutex<Inner>,
     events: broadcast::Sender<AppEvent>,
     history_keep: Arc<AtomicU32>,
+    shutdown_notify: tokio::sync::Notify,
     engine: Arc<fakes_workflow::WorkflowEngine>,
 }
 
@@ -170,6 +175,7 @@ impl FakesApp {
             inner: Mutex::new(Inner { registry, active }),
             events,
             history_keep,
+            shutdown_notify: tokio::sync::Notify::new(),
             engine,
         });
         app.server.reconcile().await;
@@ -191,6 +197,16 @@ impl FakesApp {
 
     pub fn server(&self) -> &Arc<MockServer> {
         &self.server
+    }
+
+    /// Pide al proceso que se detenga (lo atiende quien lanzó la aplicación).
+    pub fn request_shutdown(&self) {
+        self.shutdown_notify.notify_one();
+    }
+
+    /// Termina cuando alguien pide detener la aplicación (`fakes detener`, API).
+    pub async fn shutdown_requested(&self) {
+        self.shutdown_notify.notified().await;
     }
 
     pub async fn shutdown(&self) {
@@ -911,7 +927,7 @@ pub(crate) fn find_service_mut<'a>(a: &'a mut Active, id: &str) -> AppResult<&'a
         .ok_or_else(|| error::not_found_service(id))
 }
 
-fn sort_services(services: &mut [Service]) {
+pub(crate) fn sort_services(services: &mut [Service]) {
     services.sort_by_key(|a| a.name.to_lowercase());
 }
 
@@ -963,7 +979,7 @@ fn workspace_view(a: &Active) -> WorkspaceView {
 }
 
 /// Completa identificadores faltantes de endpoint y escenarios.
-fn normalize_endpoint(ep: &mut Endpoint, siblings: &[Endpoint]) {
+pub(crate) fn normalize_endpoint(ep: &mut Endpoint, siblings: &[Endpoint]) {
     ep.schema_version = fakes_domain::SCHEMA_VERSION;
     if ep.id.trim().is_empty() {
         let hint = endpoint_id_hint(ep.method, &ep.path);
@@ -996,7 +1012,7 @@ fn workflow_ids(svc: &Service) -> Vec<&str> {
     svc.workflows.iter().map(|w| w.id.as_str()).collect()
 }
 
-fn full_endpoint_issues(
+pub(crate) fn full_endpoint_issues(
     ep: &Endpoint,
     siblings: &[&Endpoint],
     workflow_ids: &[&str],

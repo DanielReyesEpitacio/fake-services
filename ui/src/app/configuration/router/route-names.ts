@@ -10,4 +10,5 @@ export const RouteNames = {
   workflow: 'workflow',
   executions: 'executions',
   execution: 'execution',
+  transfer: 'transfer',
 } as const

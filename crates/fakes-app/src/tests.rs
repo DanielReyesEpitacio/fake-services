@@ -428,3 +428,146 @@ async fn mifiel_end_to_end_with_webhooks() {
     assert_eq!(c.status, fakes_store::ExecutionStatus::Cancelled);
     app.shutdown().await;
 }
+
+#[tokio::test]
+async fn export_and_import_bundles() {
+    use crate::bundle::*;
+
+    // Máquina A: el ejemplo + un servicio propio + un archivo.
+    let tmp_a = tempfile::tempdir().unwrap();
+    let a = app(tmp_a.path()).await;
+    let svc: Service = serde_json::from_value(json!({
+        "name": "Belvo", "port": null,
+        "workflows": [{"name": "Avisar", "steps": [{"type": "wait", "durationMs": 1}]}],
+        "endpoints": [{"method": "GET", "path": "/accounts",
+            "scenarios": [{"name": "ok", "workflows": [{"workflowId": "avisar"}], "response": {"status": 200}}]}]
+    }))
+    .unwrap();
+    a.create_service(svc).await.unwrap();
+    let ws_dir = PathBuf::from(a.status().await.unwrap().workspace_path);
+    std::fs::create_dir_all(ws_dir.join("files/contratos")).unwrap();
+    std::fs::write(ws_dir.join("files/contratos/c1.pdf"), b"%PDF-1.7").unwrap();
+
+    let only_belvo = a
+        .export_bundle(&ExportOptions {
+            services: vec!["belvo".into()],
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(only_belvo.services.len(), 1);
+    assert!(only_belvo.workspace.is_none() && only_belvo.files.is_empty());
+
+    let full = a
+        .export_bundle(&ExportOptions {
+            services: vec![],
+            include_workspace: true,
+            include_files: true,
+        })
+        .await
+        .unwrap();
+    assert_eq!(full.format, BUNDLE_FORMAT);
+    assert_eq!(full.services.len(), 2);
+    assert_eq!(full.files.len(), 1);
+    // El bundle es JSON estable y se puede volver a leer.
+    let text = serde_json::to_string_pretty(&full).unwrap();
+    let full: Bundle = serde_json::from_str(&text).unwrap();
+    a.shutdown().await;
+
+    // Máquina B: instalación nueva (ya trae "ejemplo").
+    let tmp_b = tempfile::tempdir().unwrap();
+    let b = app(tmp_b.path()).await;
+    let req = |bundle: &Bundle, on_conflict, dry_run| ImportRequest {
+        bundle: bundle.clone(),
+        mode: ImportMode::Merge,
+        on_conflict,
+        workspace_name: None,
+        path: None,
+        dry_run,
+    };
+
+    // Simulación: no escribe nada.
+    let r = b
+        .import_bundle(req(&full, OnConflict::Rename, true))
+        .await
+        .unwrap();
+    assert!(r.dry_run);
+    assert_eq!(b.list_services().await.len(), 1);
+
+    // Omitir conflictos: solo entra Belvo.
+    let r = b
+        .import_bundle(req(&full, OnConflict::Skip, false))
+        .await
+        .unwrap();
+    assert_eq!(r.created, vec!["belvo"]);
+    assert_eq!(r.skipped, vec!["ejemplo"]);
+    assert_eq!(r.files, 1);
+    let b_dir = PathBuf::from(b.status().await.unwrap().workspace_path);
+    assert_eq!(
+        std::fs::read(b_dir.join("files/contratos/c1.pdf")).unwrap(),
+        b"%PDF-1.7"
+    );
+    assert_eq!(b.list_workflows("belvo").await.unwrap()[0].used_by.len(), 1);
+
+    // Renombrar: entra una copia con otro id y prefijo.
+    let r = b
+        .import_bundle(req(&only_belvo, OnConflict::Rename, false))
+        .await
+        .unwrap();
+    assert_eq!(r.renamed[0].from, "belvo");
+    assert_eq!(r.renamed[0].to, "belvo-2");
+    assert!(r.warnings.iter().any(|w| w.contains("prefijo")));
+    let copy = b.get_service("belvo-2").await.unwrap();
+    assert_eq!(copy.service.prefix, "/belvo-2");
+    assert_eq!(copy.service.workflows.len(), 1);
+
+    // Reemplazar.
+    let mut changed = only_belvo.clone();
+    changed.services[0].description = "versión nueva".into();
+    let r = b
+        .import_bundle(req(&changed, OnConflict::Replace, false))
+        .await
+        .unwrap();
+    assert_eq!(r.replaced, vec!["belvo"]);
+    assert_eq!(
+        b.get_service("belvo").await.unwrap().service.description,
+        "versión nueva"
+    );
+
+    // Un archivo inválido no escribe nada.
+    let mut bad = only_belvo.clone();
+    bad.services[0].id = "otro".into();
+    bad.services[0].prefix = "/otro".into();
+    bad.services[0].endpoints[0].path = "sin-barra".into();
+    let before = b.list_services().await.len();
+    assert!(matches!(
+        b.import_bundle(req(&bad, OnConflict::Rename, false)).await,
+        Err(AppError::Validation(_))
+    ));
+    assert_eq!(b.list_services().await.len(), before);
+    let mut wrong = only_belvo.clone();
+    wrong.format = "mockoon".into();
+    assert!(matches!(
+        b.import_bundle(req(&wrong, OnConflict::Rename, false))
+            .await,
+        Err(AppError::BadRequest(_))
+    ));
+
+    // Como espacio nuevo.
+    let r = b
+        .import_bundle(ImportRequest {
+            bundle: full.clone(),
+            mode: ImportMode::NewWorkspace,
+            on_conflict: OnConflict::Rename,
+            workspace_name: Some("Copia de A".into()),
+            path: None,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+    assert_eq!(r.workspace_id, "copia-de-a");
+    assert_eq!(r.created.len(), 2);
+    assert_eq!(b.status().await.unwrap().workspace_name, "Copia de A");
+    assert_eq!(b.list_workspaces().await.len(), 2);
+    b.shutdown().await;
+}

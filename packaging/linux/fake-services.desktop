@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Fake Services
+GenericName=Simulador de APIs
+Comment=Simula servicios externos en tu equipo y abre la interfaz web
+Exec=fakes
+Icon=fake-services
+Terminal=false
+Categories=Development;Network;
+Keywords=api;mock;webhook;simulador;
+StartupNotify=false

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, provide, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { api, ApiError } from '@/infrastructure/api/client.ts'
+import { api, ApiError, saveJson } from '@/infrastructure/api/client.ts'
 import { formatTime, onExecution, store, toast, toastError } from '@/app/shared/state/live.ts'
 import { confirmAction } from '@/app/shared/state/confirm.ts'
 import EmptyState from '@/app/shared/components/EmptyState.vue'
@@ -308,6 +308,9 @@ function onKey(e: KeyboardEvent) {
             <VChip v-if="!wf.enabled" size="small" variant="tonal">Deshabilitado</VChip>
             <VSpacer />
             <VChip v-if="dirty" color="primary" variant="tonal" size="small">Cambios sin guardar</VChip>
+            <VBtn variant="text" prepend-icon="mdi-download" title="Descargar este workflow como JSON" @click="saveJson(payload(), `workflow-${wf.id}.json`)">
+              Exportar
+            </VBtn>
             <VBtn variant="tonal" prepend-icon="mdi-play" :disabled="dirty" @click="runDialog = true">Ejecutar</VBtn>
             <VBtn variant="text" :disabled="!dirty" @click="discard">Descartar</VBtn>
             <VBtn color="primary" :disabled="!dirty" :loading="saving" title="Ctrl+S" @click="save">{{ t('common.save') }}</VBtn>

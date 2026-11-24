@@ -13,6 +13,7 @@ export default {
     settings: 'Ajustes',
     appearance: 'Apariencia',
     executions: 'Ejecuciones',
+    transfer: 'Importar y exportar',
   },
   stepType: {
     wait: 'Esperar',

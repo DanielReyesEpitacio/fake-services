@@ -5,14 +5,15 @@
 | Capa | Tecnología | Por qué |
 |---|---|---|
 | Núcleo | Rust 2024, Tokio, Axum | Binario único, sin runtime externo, bajo consumo de memoria (~15 MB en reposo) y concurrencia segura para muchas ejecuciones simultáneas. |
-| Escritorio | Tauri 2 | WebView del sistema (WebView2 / WebKitGTK) en lugar de un Chromium empaquetado; genera NSIS/MSI, AppImage, DEB y RPM; incluye bandeja, inicio automático e instancia única. |
+| Distribución | Binario único + paquetes `.deb`, `.rpm`, `.tar.gz` y `.zip` | Sin dependencias del sistema ni WebView: la interfaz se usa en el navegador. El CLI abre el navegador, y el autoinicio se integra con el sistema (XDG autostart en Linux, clave `Run` en Windows). |
 | Interfaz | Vue 3, TypeScript, Vite, Vuetify 4, CodeMirror 6 | Componentes maduros y temas nativos. Los *look and feels* (Cupertino Glass por defecto, Fluent, JetBrains, Atlas…) vienen del módulo de temas de la plataforma (`ui/src/platform/adapters/vue/themes`). La UI se compila y se embebe en el binario (`rust-embed`): funciona sin Internet. |
 | Plantillas | MiniJinja | Sintaxis `{{ }}` conocida, sandbox, límite de ejecución (fuel) y sin acceso a E/S. |
 | Validación | `jsonschema` | JSON Schema completo para validar bodies. |
 | Persistencia | Archivos JSON + SQLite (`sqlx`, incluido en el binario) | JSON para la configuración (Git); SQLite en modo WAL para el historial y las ejecuciones de workflows (estado durable y línea de tiempo). |
 
-Alternativas descartadas: Electron (más de 200 MB de RAM y sin modo sin interfaz natural), Go +
-Wails (su empaquetado AppImage/DEB está menos maduro) y Docker (es requisito no depender de él).
+Alternativas descartadas: una app de escritorio (Tauri, Electron), que exige WebView o un
+Chromium empaquetado y dependencias del sistema, sin aportar nada que el navegador no dé, y
+Docker, porque es requisito no depender de él.
 
 ## Componentes
 
@@ -29,8 +30,9 @@ crates/
   (fase 3)        9. Servidor MCP (usará fakes-app igual que la API REST).
   ui/            10. Interfaz gráfica (Vue + Vuetify).
   fakes-app       Servicios de aplicación: los casos de uso que comparten UI, REST y MCP.
-  fakes-cli       Binario `fakes` (sin interfaz de escritorio).
-apps/desktop      Binario de escritorio (Tauri).
+  fakes-cli       Binario `fakes`: arranque, apertura del navegador, empaquetado.
+packaging/        Acceso del menú (Linux) e instalador de doble clic (Windows).
+scripts/          Compilar, empaquetar e instalar.
 ```
 
 Dependencias (sin ciclos, de abajo hacia arriba):
@@ -41,7 +43,7 @@ domain ← matching ← server
 domain ← response ← server
 store  ← server
 domain, matching, response, store ← workflow
-config, matching, response, store, server, workflow ← app ← api ← cli / desktop
+config, matching, response, store, server, workflow ← app ← api ← cli
 ```
 
 `fakes-domain` no depende de nada del sistema (ni HTTP, ni disco, ni plantillas).

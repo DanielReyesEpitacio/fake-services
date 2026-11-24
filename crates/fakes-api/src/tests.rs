@@ -279,3 +279,66 @@ async fn workflows_and_executions_through_rest() {
     assert_eq!(s, 200);
     app.shutdown().await;
 }
+
+#[tokio::test]
+async fn export_then_import_through_rest() {
+    let (router, app, _tmp) = setup().await;
+    let resp = router
+        .clone()
+        .oneshot(
+            Request::get("/api/v1/export?services=ejemplo&workspace=true")
+                .header("host", "127.0.0.1:4010")
+                .header("authorization", format!("Bearer {TOKEN}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), 200);
+    let cd = resp.headers()["content-disposition"]
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        cd.starts_with("attachment; filename=\"fake-services-ejemplo-20"),
+        "{cd}"
+    );
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let bundle: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(bundle["format"], "fake-services");
+    assert_eq!(bundle["services"][0]["id"], "ejemplo");
+    assert!(bundle["services"][0]["workflows"].as_array().unwrap().len() >= 2);
+
+    let (s, v) = send(
+        &router,
+        "POST",
+        "/api/v1/import",
+        Some(json!({"bundle": bundle, "dryRun": true})),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["renamed"][0]["to"], "ejemplo-2");
+    let (s, v) = send(
+        &router,
+        "POST",
+        "/api/v1/import",
+        Some(json!({"bundle": bundle, "onConflict": "skip"})),
+    )
+    .await;
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["skipped"], json!(["ejemplo"]));
+    let (s, v) = send(
+        &router,
+        "POST",
+        "/api/v1/import",
+        Some(json!({"bundle": {"format": "otro", "formatVersion": 1}})),
+    )
+    .await;
+    assert_eq!(s, 400, "{v}");
+    let (s, _) = send(&router, "GET", "/api/v1/schemas/bundle", None).await;
+    assert_eq!(s, 200);
+    let (s, v) = send(&router, "GET", "/api/v1/system/autostart", None).await;
+    assert_eq!(s, 200);
+    assert!(v["supported"].is_boolean());
+    app.shutdown().await;
+}

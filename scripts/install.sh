@@ -1,31 +1,38 @@
 #!/usr/bin/env bash
-# Instala Fake Services en Linux (compila primero si hace falta).
+# Instala o actualiza Fake Services para tu usuario en Linux. No usa sudo
+# (salvo que aceptes quitar un paquete del sistema antiguo).
 #
-#   ./scripts/install.sh               CLI `fakes` + app de escritorio
-#   ./scripts/install.sh --solo-cli    solo el CLI `fakes` (sin sudo)
-#   ./scripts/install.sh --desinstalar quita lo instalado por este script
+#   ./instalar.sh                 instala, actualiza o reinstala (siempre el mismo comando)
+#   ./instalar.sh --desinstalar   quita lo instalado (tus datos se conservan)
+#   ./instalar.sh -y              responde "sí" a todo
 #
-# El CLI se instala en ~/.local/bin. La app de escritorio se instala con el
-# paquete de tu distribución (DEB o RPM) o, si no hay, como AppImage en tu
-# carpeta personal.
+# Si hay una versión anterior: la detiene, la reemplaza, limpia restos de
+# instalaciones viejas y, si estaba en ejecución, inicia la nueva.
+# Funciona desde el paquete descargado (usa el binario incluido) o desde el
+# repositorio (compila primero con scripts/build.sh).
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 BIN_DIR="${HOME}/.local/bin"
-APP_DIR="${HOME}/.local/share/fake-services-app"
-DESKTOP_FILE="${HOME}/.local/share/applications/fake-services.desktop"
+BIN="$BIN_DIR/fakes"
+APPS_DIR="$DATA_HOME/applications"
+ICON_DIR="$DATA_HOME/icons/hicolor/512x512/apps"
+AUTOSTART="${XDG_CONFIG_HOME:-$HOME/.config}/autostart/fake-services.desktop"
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/fake-services"
+# Restos de versiones anteriores (app de escritorio).
+LEGACY_APP_DIR="$DATA_HOME/fake-services-app"
 PKG_NAME="fake-services"
-SOLO_CLI=0
-DESINSTALAR=0
-EXTRA=()
+ADMIN_PORT="${FAKES_ADMIN_PORT:-4010}"
 
+DESINSTALAR=0
+SI=0
 for arg in "$@"; do
   case "$arg" in
-    --solo-cli) SOLO_CLI=1 ;;
     --desinstalar|--uninstall) DESINSTALAR=1 ;;
-    -y|--si) EXTRA+=("--si") ;;
-    -h|--help|--ayuda) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -y|--si|--yes) SI=1 ;;
+    -h|--help|--ayuda) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "Opción desconocida: $arg (usa --ayuda)" >&2; exit 2 ;;
   esac
 done
@@ -35,88 +42,180 @@ paso() { echo; echo "${B}▸ $*${N}"; }
 ok()   { echo "  ${V}✓${N} $*"; }
 aviso(){ echo "  ${A}!${N} $*"; }
 
-cd "$ROOT"
+confirmar() {
+  [ "$SI" = 1 ] && return 0
+  [ -t 0 ] || return 1
+  read -r -p "  $1 [s/N] " r
+  [[ "$r" =~ ^[sSyY]$ ]]
+}
+
+version_of() { "$1" --version 2>/dev/null | awk '{print $2}'; }
+
+# PIDs de Fake Services instalado (no toca compilaciones de desarrollo).
+installed_pids() {
+  local pid exe
+  for pid in $(pgrep -x fakes 2>/dev/null; pgrep -x fake-services 2>/dev/null); do
+    exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
+    exe="${exe% (deleted)}"
+    case "$exe" in
+      "$BIN"|/usr/bin/fakes|/usr/bin/fake-services|"$LEGACY_APP_DIR"/*|/tmp/.mount_*) echo "$pid" ;;
+    esac
+  done
+}
+
+health() {
+  { exec 3<>"/dev/tcp/127.0.0.1/$ADMIN_PORT"; } 2>/dev/null || return 1
+  printf 'GET /healthz HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n' >&3
+  local resp; resp="$(timeout 2 cat <&3 || true)"
+  exec 3>&- 3<&-
+  [[ "$resp" == *" 200"* ]]
+}
+
+# Detiene las instancias instaladas: primero de forma ordenada, luego por señal.
+stop_running() {
+  local pids; pids="$(installed_pids | sort -u | tr '\n' ' ')"
+  [ -z "${pids// /}" ] && return 1
+  aviso "Fake Services está en ejecución; se detendrá para continuar."
+  local tool="${1:-}"
+  if [ -n "$tool" ] && [ -x "$tool" ]; then
+    "$tool" detener >/dev/null 2>&1 || true
+  fi
+  for i in $(seq 1 40); do
+    [ -z "$(installed_pids)" ] && break
+    # Versiones sin `fakes detener`: señal de término (también es un cierre ordenado).
+    [ "$i" -eq 10 ] && kill -TERM $pids 2>/dev/null || true
+    sleep 0.3
+  done
+  if [ -n "$(installed_pids)" ]; then
+    kill -KILL $pids 2>/dev/null || true
+    sleep 0.3
+  fi
+  ok "Instancia anterior detenida"
+  return 0
+}
+
+refresh_menus() {
+  command -v update-desktop-database >/dev/null && update-desktop-database "$APPS_DIR" 2>/dev/null || true
+  command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -q -t "${ICON_DIR%/512x512/apps}" 2>/dev/null || true
+}
+
+system_package() {
+  if command -v dpkg >/dev/null && dpkg -s "$PKG_NAME" >/dev/null 2>&1; then echo apt
+  elif command -v rpm >/dev/null && rpm -q "$PKG_NAME" >/dev/null 2>&1; then echo dnf
+  fi
+}
+
+remove_legacy() {
+  if [ -d "$LEGACY_APP_DIR" ]; then
+    rm -rf "$LEGACY_APP_DIR"
+    ok "Se quitó la app de escritorio anterior (AppImage)"
+  fi
+}
 
 # ---------------------------------------------------------------------------
 if [ "$DESINSTALAR" = 1 ]; then
   paso "Desinstalando Fake Services"
-  rm -f "$BIN_DIR/fakes" && ok "CLI eliminado de $BIN_DIR"
-  if [ -d "$APP_DIR" ] || [ -f "$DESKTOP_FILE" ]; then
-    rm -rf "$APP_DIR" "$DESKTOP_FILE"
-    ok "AppImage y acceso directo eliminados"
-  fi
-  if command -v dpkg >/dev/null && dpkg -s "$PKG_NAME" >/dev/null 2>&1; then
-    sudo apt-get remove -y "$PKG_NAME" && ok "Paquete DEB eliminado"
-  elif command -v rpm >/dev/null && rpm -q "$PKG_NAME" >/dev/null 2>&1; then
-    sudo dnf remove -y "$PKG_NAME" && ok "Paquete RPM eliminado"
+  stop_running "$BIN" || true
+  rm -f "$BIN" "$APPS_DIR/fake-services.desktop" "$ICON_DIR/fake-services.png" "$AUTOSTART"
+  remove_legacy
+  refresh_menus
+  ok "Se quitaron el programa, el acceso del menú y el inicio automático"
+  pkg="$(system_package)"
+  if [ -n "$pkg" ]; then
+    aviso "También está instalado el paquete del sistema «$PKG_NAME»."
+    if confirmar "¿Quitarlo? (pedirá tu contraseña de sudo)"; then
+      sudo "$pkg" remove -y "$PKG_NAME" && ok "Paquete del sistema eliminado"
+    fi
   fi
   echo
-  echo "  Tus espacios de trabajo e historial se conservan en ~/.local/share/fake-services."
+  echo "  Tus espacios de trabajo e historial siguen en ~/.local/share/fake-services."
   echo "  Bórralos a mano si ya no los necesitas."
   exit 0
 fi
 
 # ---------------------------------------------------------------------------
-shopt -s nullglob
-
-# Siempre se compila: cargo y pnpm solo rehacen lo que cambió, y así nunca
-# se instala un binario viejo.
-if [ "$SOLO_CLI" = 1 ]; then
-  "$ROOT/scripts/build.sh" --solo-cli "${EXTRA[@]}"
+# ¿Paquete descargado (binario junto al script) o repositorio?
+if [ -x "$HERE/fakes" ]; then
+  SRC_BIN="$HERE/fakes"
+  SRC_DESKTOP="$HERE/fake-services.desktop"
+  SRC_ICON="$HERE/fake-services.png"
 else
-  "$ROOT/scripts/build.sh" "${EXTRA[@]}"
+  ROOT="$(cd "$HERE/.." && pwd)"
+  "$ROOT/scripts/build.sh"
+  SRC_BIN="$ROOT/target/release/fakes"
+  SRC_DESKTOP="$ROOT/packaging/linux/fake-services.desktop"
+  SRC_ICON="$ROOT/assets/brand/logo-512.png"
 fi
 
-# ---------------------------------------------------------------------------
-paso "Instalando el CLI"
-mkdir -p "$BIN_DIR"
-install -m 0755 target/release/fakes "$BIN_DIR/fakes"
-ok "fakes → $BIN_DIR/fakes"
-case ":$PATH:" in
-  *":$BIN_DIR:"*) ;;
-  *) aviso "$BIN_DIR no está en tu PATH. Agrega a ~/.bashrc o ~/.zshrc:  export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
-esac
+NEW_VERSION="$(version_of "$SRC_BIN")"
+OLD_VERSION=""
+[ -x "$BIN" ] && OLD_VERSION="$(version_of "$BIN")"
 
-# ---------------------------------------------------------------------------
-if [ "$SOLO_CLI" = 0 ]; then
-  paso "Instalando la app de escritorio"
-  debs=(target/release/bundle/deb/*.deb)
-  rpms=(target/release/bundle/rpm/*.rpm)
-  images=(target/release/bundle/appimage/*.AppImage)
+if [ -z "$OLD_VERSION" ]; then
+  paso "Instalando Fake Services $NEW_VERSION"
+elif [ "$OLD_VERSION" = "$NEW_VERSION" ]; then
+  paso "Reinstalando Fake Services $NEW_VERSION"
+else
+  paso "Actualizando Fake Services de $OLD_VERSION a $NEW_VERSION"
+fi
 
-  if command -v apt-get >/dev/null && [ ${#debs[@]} -gt 0 ]; then
-    echo "  Se instalará ${debs[-1]##*/} con apt (pedirá tu contraseña de sudo)."
-    sudo apt-get install -y "./${debs[-1]}"
-    ok "App instalada desde el paquete DEB"
-  elif command -v dnf >/dev/null && [ ${#rpms[@]} -gt 0 ]; then
-    echo "  Se instalará ${rpms[-1]##*/} con dnf (pedirá tu contraseña de sudo)."
-    sudo dnf install -y "./${rpms[-1]}"
-    ok "App instalada desde el paquete RPM"
-  elif [ ${#images[@]} -gt 0 ]; then
-    mkdir -p "$APP_DIR" "$(dirname "$DESKTOP_FILE")"
-    install -m 0755 "${images[-1]}" "$APP_DIR/FakeServices.AppImage"
-    install -m 0644 apps/desktop/icons/512x512.png "$APP_DIR/icon.png"
-    cat > "$DESKTOP_FILE" <<EOF
-[Desktop Entry]
-Type=Application
-Name=Fake Services
-Comment=Simulador local de servicios externos
-Exec=$APP_DIR/FakeServices.AppImage
-Icon=$APP_DIR/icon.png
-Categories=Development;
-Terminal=false
-EOF
-    command -v update-desktop-database >/dev/null && update-desktop-database "$(dirname "$DESKTOP_FILE")" 2>/dev/null || true
-    ok "AppImage instalada en $APP_DIR (aparece en el menú de aplicaciones)"
-    aviso "Si no abre, instala libfuse2 (Ubuntu/Debian: sudo apt install libfuse2)."
+WAS_RUNNING=0
+if stop_running "$SRC_BIN"; then WAS_RUNNING=1; fi
+remove_legacy
+
+pkg="$(system_package)"
+if [ -n "$pkg" ]; then
+  aviso "Hay un paquete del sistema «$PKG_NAME» de una instalación anterior."
+  if confirmar "¿Quitarlo para dejar una sola instalación? (pedirá tu contraseña de sudo)"; then
+    sudo "$pkg" remove -y "$PKG_NAME" && ok "Paquete del sistema eliminado"
   else
-    aviso "No se encontraron instaladores de escritorio; solo quedó instalado el CLI."
+    aviso "Se conserva; la versión de ~/.local/bin tiene prioridad si está antes en tu PATH."
   fi
 fi
 
-# ---------------------------------------------------------------------------
+mkdir -p "$BIN_DIR" "$APPS_DIR" "$ICON_DIR"
+# Copia a un temporal y renombra: reemplazo atómico aunque el archivo esté en uso.
+install -m 0755 "$SRC_BIN" "$BIN.nuevo"
+mv -f "$BIN.nuevo" "$BIN"
+ok "Programa: $BIN"
+
+if [ -f "$SRC_ICON" ]; then
+  install -m 0644 "$SRC_ICON" "$ICON_DIR/fake-services.png"
+fi
+if [ -f "$SRC_DESKTOP" ]; then
+  # Ruta completa: el menú del escritorio no siempre incluye ~/.local/bin en el PATH.
+  sed "s|^Exec=fakes|Exec=\"$BIN\"|" "$SRC_DESKTOP" > "$APPS_DIR/fake-services.desktop"
+  chmod 0644 "$APPS_DIR/fake-services.desktop"
+  ok "Acceso en el menú de aplicaciones: «Fake Services»"
+fi
+refresh_menus
+
+# El inicio automático siempre apunta al binario instalado.
+if [ -f "$AUTOSTART" ]; then
+  sed -i "s|^Exec=.*|Exec=\"$BIN\" serve --sin-navegador|" "$AUTOSTART"
+  ok "Inicio automático actualizado"
+fi
+
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *)
+    aviso "$BIN_DIR no está en tu PATH. Para usar «fakes» desde la terminal agrega a ~/.bashrc o ~/.zshrc:"
+    echo "      export PATH=\"\$HOME/.local/bin:\$PATH\""
+    ;;
+esac
+
+if [ "$WAS_RUNNING" = 1 ]; then
+  mkdir -p "$LOG_DIR"
+  nohup setsid "$BIN" serve --sin-navegador >"$LOG_DIR/fakes.log" 2>&1 < /dev/null &
+  for _ in $(seq 1 50); do health && break; sleep 0.2; done
+  if health; then
+    ok "Fake Services $NEW_VERSION se reinició en segundo plano (detenlo con: fakes detener)"
+  else
+    aviso "No se pudo confirmar el reinicio; revisa $LOG_DIR/fakes.log"
+  fi
+fi
+
 paso "Listo"
-echo "  Ejecuta:  fakes serve"
-echo "  Interfaz: http://127.0.0.1:4010   Simulaciones: http://127.0.0.1:4000"
-[ "$SOLO_CLI" = 0 ] && echo "  O abre «Fake Services» desde el menú de aplicaciones."
-true
+echo "  Abre «Fake Services» desde el menú de aplicaciones o ejecuta:  fakes"
+echo "  La interfaz se abre en tu navegador: http://127.0.0.1:$ADMIN_PORT"
+echo "  Tus espacios de trabajo y configuración se conservan entre versiones."

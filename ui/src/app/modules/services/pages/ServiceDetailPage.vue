@@ -189,6 +189,15 @@ async function save() {
   }
 }
 
+async function exportService() {
+  try {
+    const name = await api.exportBundle({ services: [props.sid] })
+    toast(`Exportado: ${name}`)
+  } catch (e) {
+    toastError(e)
+  }
+}
+
 async function remove() {
   if (!view.value) return
   const ok = await confirmAction({
@@ -231,6 +240,7 @@ async function remove() {
           </span>
         </template>
         <template #actions>
+          <VBtn variant="tonal" prepend-icon="mdi-download" @click="exportService">Exportar</VBtn>
           <RunToggle :id="view.service.id" :running="view.running" />
         </template>
       </PageHeader>

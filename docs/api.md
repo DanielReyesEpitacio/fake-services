@@ -41,7 +41,7 @@ rebinding).
 | GET | `/status` | Versión, espacio activo, URLs, puertos, contadores y problemas de carga. |
 | POST | `/reload` | Relee el espacio activo desde disco. |
 | GET | `/events` | Eventos en vivo (SSE): `request`, `config_changed`, `runtime_changed`, `execution`, `workflow_event`. |
-| GET | `/schemas/{workspace\|service\|endpoint\|workflow}` | JSON Schema de cada documento. |
+| GET | `/schemas/{workspace\|service\|endpoint\|workflow\|bundle}` | JSON Schema de cada documento. |
 
 ### Espacios de trabajo
 
@@ -96,6 +96,26 @@ rebinding).
 
 Los eventos en vivo (`/events`) incluyen `execution` (cambio de estado) y `workflow_event`
 (pasos `emit`).
+
+### Importar y exportar
+
+| Método | Ruta | Parámetros / body |
+|---|---|---|
+| GET | `/export` | `services` (ids separados por comas; vacío = todos), `workspace=true`, `files=true`. Devuelve el archivo como descarga. |
+| POST | `/import` | `{ "bundle": {...}, "mode": "merge"\|"newWorkspace", "onConflict": "rename"\|"replace"\|"skip", "workspaceName"?, "dryRun"? }` → reporte. Hasta 64 MB. |
+
+El bundle tiene `format: "fake-services"`, `formatVersion`, `services` (completos, con endpoints y
+workflows), `workspace` opcional y `files` (ruta → base64). Esquema: `/schemas/bundle`. La
+importación valida todo antes de escribir; con `dryRun` solo informa qué pasaría. Los workflows
+sueltos se importan con `POST /services/{sid}/workflows`.
+
+### Sistema
+
+| Método | Ruta | Body |
+|---|---|---|
+| GET | `/system/autostart` | — |
+| PUT | `/system/autostart` | `{ "enabled": true }`: iniciar Fake Services al iniciar sesión. |
+| POST | `/system/shutdown` | Detiene Fake Services de forma ordenada (202). Lo usan `fakes detener` y los instaladores. |
 
 ### Historial
 

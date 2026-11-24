@@ -11,21 +11,6 @@ members = [
     "crates/fakes-app",
     "crates/fakes-api",
     "crates/fakes-cli",
-    "apps/desktop",
-]
-# La app de escritorio necesita dependencias del sistema (WebKitGTK en Linux).
-# `cargo build` / `cargo test` sin argumentos compilan solo el núcleo y el CLI.
-default-members = [
-    "crates/fakes-domain",
-    "crates/fakes-config",
-    "crates/fakes-matching",
-    "crates/fakes-response",
-    "crates/fakes-store",
-    "crates/fakes-server",
-    "crates/fakes-workflow",
-    "crates/fakes-app",
-    "crates/fakes-api",
-    "crates/fakes-cli",
 ]
 
 [workspace.package]

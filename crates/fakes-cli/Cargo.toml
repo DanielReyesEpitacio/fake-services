@@ -1,9 +1,13 @@
 [package]
 name = "fakes-cli"
-description = "CLI de Fake Services: `fakes serve`"
+description = "Fake Services: simulador local de servicios externos con interfaz web"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+authors.workspace = true
+homepage = "https://github.com/fake-services/fake-services"
+readme = "../../README.md"
 
 [[bin]]
 name = "fakes"
@@ -18,3 +22,38 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 anyhow.workspace = true
+
+[build-dependencies]
+winresource = "0.1"
+
+# Paquete .deb (cargo deb -p fakes-cli)
+[package.metadata.deb]
+name = "fake-services"
+maintainer = "Fake Services contributors"
+copyright = "Fake Services contributors"
+section = "devel"
+priority = "optional"
+extended-description = """\
+Fake Services simula localmente las APIs de terceros que usa tu aplicación \
+(endpoints, escenarios, webhooks y workflows asíncronos). Un solo binario con \
+servidor HTTP, motor de simulación e interfaz web; sin Docker ni dependencias."""
+depends = "$auto"
+assets = [
+    ["target/release/fakes", "usr/bin/fakes", "755"],
+    ["../../packaging/linux/fake-services.desktop", "usr/share/applications/fake-services.desktop", "644"],
+    ["../../assets/brand/logo-512.png", "usr/share/icons/hicolor/512x512/apps/fake-services.png", "644"],
+    ["../../assets/brand/logo-256.png", "usr/share/icons/hicolor/256x256/apps/fake-services.png", "644"],
+    ["../../assets/brand/logo-128.png", "usr/share/icons/hicolor/128x128/apps/fake-services.png", "644"],
+    ["../../assets/brand/logo.svg", "usr/share/icons/hicolor/scalable/apps/fake-services.svg", "644"],
+]
+
+# Paquete .rpm (cargo generate-rpm -p crates/fakes-cli)
+[package.metadata.generate-rpm]
+name = "fake-services"
+summary = "Simulador local de servicios externos con interfaz web"
+assets = [
+    { source = "target/release/fakes", dest = "/usr/bin/fakes", mode = "755" },
+    { source = "packaging/linux/fake-services.desktop", dest = "/usr/share/applications/fake-services.desktop", mode = "644" },
+    { source = "assets/brand/logo-512.png", dest = "/usr/share/icons/hicolor/512x512/apps/fake-services.png", mode = "644" },
+    { source = "assets/brand/logo.svg", dest = "/usr/share/icons/hicolor/scalable/apps/fake-services.svg", mode = "644" },
+]
